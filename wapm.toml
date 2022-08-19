@@ -1,0 +1,17 @@
+[package]
+name = "tau-dev/taufs"
+version = "0.1.0"
+description = "A flight simulator on WASM-4."
+license = "ISC"
+readme = "README.md"
+
+[[module]]
+name = "taufs"
+source = "zig-out/lib/taufs1.wasm"
+abi = "wasm4"
+interfaces = { wasm4 = "0.0.1" }
+
+[[command]]
+runner = "wasm4@0.0.1"
+name = "play"
+module = "taufs"
