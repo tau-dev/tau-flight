@@ -163,33 +163,23 @@ export fn update() void {
         throttle += throttle_speed;
     throttle = math.clamp(throttle, 0, 1);
 
-    const lift_fac = 0.09;
-    const stall_start = 18;
-    const stall_reduction = 0.05;
     const drag_min = 0.02;
-    const drag_fac = 0.0003;
     const thrust = 0.04;
     const gravity = -0.1;
     _ = gravity;
 
-    const wing_angle = mult(cam_rot, from_axis(.{1, 0, 0}, -5));
-    const relative_air = rot(surface_speed, conj(wing_angle));
+    var stalling: bool = false;
 
-    const a = len(v2{relative_air[1], relative_air[2]});
-//     _ = a;
-    const pitch_aoa = -std.math.atan2(f32, relative_air[1] / a, relative_air[2] / a) / math.pi * 180;
-//     const pitch_aoa = @as(f32, 0.0);
-    const stall_amount = math.clamp((@fabs(pitch_aoa)-@as(f32, stall_start))*0.2, 0.0, 1.0);
+    const wing_main = wingForce(from_axis(.{1, 0, 0}, 5), 0.09, 0.0003, &stalling);
+    const wing_side = wingForce(from_axis(.{0, 0, 1}, 90), 0.02, 0.00005, null);
 
-    const lift = math.clamp(pitch_aoa * lift_fac, -5, 5) * (1 - (1-stall_reduction) * stall_amount);
-    const speed_squared = dot(surface_speed, surface_speed);
-    const force = v3{0, lift * speed_squared, thrust * throttle};
-    _ = force;
+//     const torque = cross(wing_main, ;
 
     const acc =
-        rot(force, wing_angle)
+        wing_main + wing_side
         + v3{0, gravity, 0}
-        + scale(surface_speed, -@minimum(30, drag_min + pitch_aoa*pitch_aoa * drag_fac) * len(surface_speed))
+        + rot(.{0, 0, -thrust*throttle}, cam_rot)
+        + scale(surface_speed, -@minimum(30, drag_min) * len(surface_speed))
     ;
 
     _ = acc;
@@ -207,9 +197,9 @@ export fn update() void {
     const turn_reset = 0.1;
 
     if (paddle.up)
-        steer[1] += turn_acc;
-    if (paddle.down)
         steer[1] -= turn_acc;
+    if (paddle.down)
+        steer[1] += turn_acc;
     if (!paddle.up and !paddle.down)
         steer[1] = moveTo(steer[1], trim[1], turn_reset);
     if (paddle.left)
@@ -219,9 +209,9 @@ export fn update() void {
     if (!paddle.left and !paddle.right)
         steer[2] = moveTo(steer[2], trim[2], turn_reset);
     if (gamepad.right)
-        steer[0] += turn_acc;
-    if (gamepad.left)
         steer[0] -= turn_acc;
+    if (gamepad.left)
+        steer[0] += turn_acc;
     if (!gamepad.right and !gamepad.left)
         steer[0] = moveTo(steer[0], trim[0], turn_reset);
 
@@ -356,7 +346,7 @@ export fn update() void {
 //     hand(140, screen_h + 20, 8, -groundheight * 0.3);
 
 
-    // Yoke (?)
+    // Yoke
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 2;
     const controls_size = 31;
@@ -386,23 +376,20 @@ export fn update() void {
     num(19, heading_display_y+6, @floatToInt(u32, @mod(heading / math.pi * 180 + 180, 360)));
     w4.blit(&degrees_text, 24, heading_display_y+6, 3,3, w4.BLIT_1BPP);
 
-    w4.blit(&speed_text, 35, heading_display_y, 16,4, w4.BLIT_1BPP);
-    num(45, heading_display_y+6, @floatToInt(u32, len(surface_speed) * 100 * knots));
-    w4.blit(&knots_text, 51, heading_display_y+8, 8,4, w4.BLIT_1BPP);
+    w4.blit(&speed_text, 38, heading_display_y, 16,4, w4.BLIT_1BPP);
+    num(50, heading_display_y+6, @floatToInt(u32, len(surface_speed) * 100 * knots));
+    w4.blit(&knots_text, 56, heading_display_y+8, 8,4, w4.BLIT_1BPP);
 
     const pitch_display_y = screen_h+21;
-    w4.blit(&pitch_text, 9, pitch_display_y, 16,4, w4.BLIT_1BPP);
+    w4.blit(&pitch_text, 8, pitch_display_y, 16,4, w4.BLIT_1BPP);
     num(19, pitch_display_y+6, @floatToInt(u32, @fabs(@round(pitch))));
     w4.blit(&degrees_text, 24, pitch_display_y+6, 3,3, w4.BLIT_1BPP);
-
-    w4.blit(&alti_text, 35, pitch_display_y, 16, 4, w4.BLIT_1BPP);
-    num(45, pitch_display_y+6, @floatToInt(u32, groundheight * 100));
-    w4.blit(&feet_text, 50, pitch_display_y+8, 16,4, w4.BLIT_1BPP);
-
-
-
-    if (@round(pitch) < 0)
+    if (@round(pitch) > 0)
         w4.blit(&numbers[10], 6, pitch_display_y+6, 4, 6, w4.BLIT_1BPP);
+
+    w4.blit(&alti_text, 42, pitch_display_y, 16, 4, w4.BLIT_1BPP);
+    num(50, pitch_display_y+6, @floatToInt(u32, groundheight * 1000));
+    w4.blit(&feet_text, 48, pitch_display_y+8, 16,4, w4.BLIT_1BPP);
 
 
     w4.DRAW_COLORS.fill = 4;
@@ -434,7 +421,7 @@ export fn update() void {
     if (!landed) {
         if (altwarn)
             newline("ALTITUDE", &y);
-        if (stall_amount > 0.1)
+        if (stalling)
             newline("STALL", &y);
     } else if (braking) {
         w4.DRAW_COLORS.fill = 2;
@@ -456,12 +443,35 @@ export fn update() void {
     frame += 1;
 }
 
+/// A null angle is the reasonable default orientation relative to the plane.
+/// Result is actually plain acceleration.
+fn wingForce(angle: vers, area: f32, drag: f32, stalling: ?*bool) v3 {
+    const stall_start = 18;
+    const stall_reduction = 0.05;
+
+    const wing_angle = mult(cam_rot, angle);
+    const relative_air = rot(surface_speed, conj(wing_angle));
+
+    const a = len(v2{relative_air[1], relative_air[2]});
+    const pitch_aoa = -std.math.atan2(f32, relative_air[1] / a, -relative_air[2] / a) / math.pi * 180;
+//     const pitch_aoa = @as(f32, 0.0);
+    const stall_amount = math.clamp((@fabs(pitch_aoa)-@as(f32, stall_start))*0.2, 0.0, 1.0);
+
+    const lift = math.clamp(pitch_aoa * area, -5, 5) * (1 - (1-stall_reduction) * stall_amount);
+    const speed_squared = dot(surface_speed, surface_speed);
+
+    if (stalling) |dest|
+        dest.* = stall_amount > 0.1;
+    return rot(v3{0, lift * speed_squared, 0}, wing_angle) - scale(surface_speed, len(surface_speed) * drag);
+}
+
 fn startGame() void {
     state = .running;
     cam_pos = cam_start;
-    cam_rot = rot_half;
+    cam_rot = rot_null;
     angular_speed = rot_null;
     surface_speed = v3{0,0,-1};
+    angular_momentum = v3{0,0,0};
     throttle = 1;
     steer = v3{0,0,0};
     trim = v3{0,0,0};
@@ -494,11 +504,12 @@ fn num(x_begin: i32, y: i32, i: u32) void {
 
 fn tooltip(p: v3, label: [*]const u8) void {
     var camspace = rot(p - cam_pos, conj(cam_rot));
+    camspace[2] *= -1;
+    camspace[1] *= -1;
     if (camspace[2] < clip_near)
         return;
     if (camspace[2] / max_depth * 7 > @intToFloat(f32, frame % 4 + 3))
         return;
-    camspace[1] *= -1;
 
     const x = project(camspace);
     if (x.x >= 0 and x.y-2 >= 0 and x.x <= screen_w and x.y <= screen_h)
@@ -575,8 +586,11 @@ fn tri(as: v3, bs: v3, cs: v3, col: u8) void {
     var b = rot(bs - cam_pos, conj(cam_rot));
     var c = rot(cs - cam_pos, conj(cam_rot));
     a[1] *= -1;
+    a[2] *= -1;
     b[1] *= -1;
+    b[2] *= -1;
     c[1] *= -1;
+    c[2] *= -1;
 
     if (a[2] < b[2])
         std.mem.swap(v3, &a, &b);
@@ -942,10 +956,10 @@ const pitch_text = [8]u8{
     0b10010010, 0b00101010,
 };
 const feet_text = [8]u8{
-    0b01100000, 0b11101110,
-    0b10010000, 0b11000100,
-    0b10010000, 0b10000100,
-    0b01100000, 0b10000100,
+    0b00000000, 0b11101110,
+    0b00000000, 0b11000100,
+    0b00000000, 0b10000100,
+    0b00000000, 0b10000100,
 };
 const alti_text = [8]u8{
     0b11101001, 0b11010000,
