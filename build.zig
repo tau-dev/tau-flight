@@ -16,8 +16,9 @@ pub fn build(b: *std.build.Builder) !void {
 
     lib.install();
 
-    const dest = b.pathJoin(&.{ b.install_path, "lib", lib.out_filename });
-    const compress = b.addSystemCommand(&.{"wasm-opt", "-Os", dest, "-o", dest});
-    compress.step.dependOn(&lib.step);
+//     const dest = b.pathJoin(&.{ b.install_path, "lib", lib.out_filename });
+//     const compress = b.addSystemCommand(&.{"wasm-opt", "-Os", dest, "-o", dest});
+//     compress.step.dependOn(&lib.step);
+
 //     b.getInstallStep().dependOn(&compress.step);
 }
