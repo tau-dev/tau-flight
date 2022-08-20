@@ -82,15 +82,16 @@ fn adsr(a: u8, d: u8, s: u8, r: u8) u32 {
 }
 
 const cam_start = v3{ 0, 2, 10 };
-
 var cam_pos = cam_start;
+const cam_default = from_axis(.{0, 1, 0}, 0);
+
 // camera->world; conj(cam_rot): world->camera
 var cam_rot = rot_half;
-var surface_speed = v3{0,0,-1};
+var ground_speed = v3{0,0,-1};
 var controls_position = v3{0,0,0}; // pitch,roll,yaw
 var angular_momentum = v3{0,0,0};
 
-const moment_of_inertia = scale(v3{1,1,1}, 0.1);//2,3,1?
+const moment_of_inertia = scale(v3{1,1,1}, 0.2);//2,3,1?
 
 comptime {
     const base = v3{1, 2, 3};
@@ -154,101 +155,8 @@ export fn update() void {
             startGame();
         return;
     }
-    w4.DRAW_COLORS.fill = 0;
-    w4.DRAW_COLORS.outline = 3;
-
     const gamepad = w4.GAMEPAD[0];
-    const throttle_speed = 0.03;
-    if (gamepad.down)
-        throttle -= throttle_speed;
-    if (gamepad.up)
-        throttle += throttle_speed;
-    throttle = math.clamp(throttle, 0, 1);
-
     const yoke = w4.GAMEPAD[1];
-//     const turnspeed = 0.5;
-//     const pitch_speed = from_axis(.{1, 0, 0}, turnspeed);
-//     const roll_speed = from_axis(.{0, 0, 1}, turnspeed*1.5);
-//     const yaw_speed = from_axis(.{0, 1, 0}, turnspeed*0.5);
-
-    const turn_acc = 0.1;
-    const turn_reset = 0.1;
-
-    if (yoke.up)
-        steer[1] -= turn_acc;
-    if (yoke.down)
-        steer[1] += turn_acc;
-    if (!yoke.up and !yoke.down)
-        steer[1] = moveTo(steer[1], trim[1], turn_reset);
-    if (yoke.left)
-        steer[2] += turn_acc;
-    if (yoke.right)
-        steer[2] -= turn_acc;
-    if (!yoke.left and !yoke.right)
-        steer[2] = moveTo(steer[2], trim[2], turn_reset);
-    if (gamepad.right)
-        steer[0] -= turn_acc;
-    if (gamepad.left)
-        steer[0] += turn_acc;
-    if (!gamepad.right and !gamepad.left)
-        steer[0] = moveTo(steer[0], trim[0], turn_reset);
-
-    steer = @maximum(v3{-1,-1,-1}, @minimum(v3{1,1,1}, steer));
-//     cam_rot =
-//         mult(mult(mult(cam_rot,
-//             from_axis(.{0, 1, 0}, steer[0] * turnspeed*0.5)),
-//             from_axis(.{1, 0, 0}, steer[1] * turnspeed*1.0)),
-//             from_axis(.{0, 0, 1}, steer[2] * turnspeed*1.5));
-
-
-    const drag_min = 0.02;
-    const thrust = 0.035;
-    const gravity = -0.1;
-    _ = gravity;
-
-    var stalling: bool = false;
-    const control_area = 0.006;
-    const steer_angle = 10;
-    const base_aoa = 0;
-
-    const wing_main_right = wingForce(from_axis(.{1, 0, 0}, base_aoa),  .{ 5,0,0}, 0.045, 0.0003, &stalling);
-    const wing_main_left = wingForce(from_axis(.{1, 0, 0}, base_aoa),  .{-5,0,0}, 0.045, 0.0003, &stalling);
-    const aileron_right = wingForce(from_axis(.{1, 0, 0}, -steer[2] * steer_angle * 0.2 + base_aoa), .{5,1,0}, control_area, 0, &stalling);
-    const aileron_left = wingForce(from_axis(.{1, 0, 0}, steer[2] * steer_angle * 0.2 + base_aoa), .{-5,1,0}, control_area, 0, &stalling);
-    const tail_vertical = wingForce(from_axis(.{0, 0, 1}, 90), .{0,0,10}, 0.02, 0.00005, &stalling);
-    const tail_horizontal = wingForce(rot_null, .{0,0,10}, 0.03, 0.00005, &stalling);
-    const elevator = wingForce(from_axis(.{1, 0, 0}, steer[1] * steer_angle +base_aoa), .{0,0,10}, control_area, 0.00001, &stalling);
-
-    const external = artificialForce(from_axis(.{0, 0, 1}, 0), .{10,0,0}, .{0,0.1,0});
-
-    const acc =
-        wing_main_right.f + wing_main_left.f + tail_vertical.f + tail_horizontal.f
-        + elevator.f + aileron_left.f + aileron_right.f
-//         + v3{0, gravity, 0}
-        + rot(.{0, 0, -thrust*throttle}, cam_rot)
-        + scale(surface_speed, -@minimum(30, drag_min) * len(surface_speed))
-    ;
-    _ = acc;
-//     surface_speed += scale(acc, 1/60.0);
-    cam_pos += scale(surface_speed, 1.0/60.0 * 2.0/3.0);
-
-    const torque = wing_main_right.trq + wing_main_left.trq + tail_vertical.trq + tail_horizontal.trq;
-    //+ elevator.trq + aileron_left.trq + aileron_right.trq;
-    angular_momentum += scale(torque, 1.0/60.0);
-    _ = torque;
-    if (w4.GAMEPAD[0].button1)
-        angular_momentum += scale(elevator.trq + aileron_left.trq + aileron_right.trq, 1.0/60.0);
-    if (w4.GAMEPAD[0].button2)
-        angular_momentum += scale(external.trq, 1.0/60.0);
-
-
-    const omega = angularSpeedInCam();//angularSpeed();
-    if (!all(omega == v3{0,0,0}))
-        cam_rot = mult(cam_rot, from_axis(scale(omega, 1.0/len(omega)), len(omega) / math.tau * 360));
-
-    cam_rot = norm(cam_rot);
-
-
 
     const groundheight = cam_pos[1] - gridheight(cam_pos[0], cam_pos[2]);
     const max_impact = 0.04; // 12m/s
@@ -262,23 +170,122 @@ export fn update() void {
     const landed = groundheight <= craft_height;
     const braking = throttle == 0 and gamepad.down;
     if (landed) {
-        const impact_speed = dot(surface_speed, ground_normal);
+        const impact_speed = dot(ground_speed, ground_normal);
         if (@fabs(impact_speed) > max_impact) {
             state = .dead;
         } else {
-            surface_speed -= scale(ground_normal, impact_speed);
+            ground_speed -= scale(ground_normal, impact_speed);
             // 9m/s² brakes, oh well
             if (braking)
-                surface_speed -= scale(surface_speed, 0.03/len(surface_speed)/60.0);
+                ground_speed -= scale(ground_speed, 0.03/len(ground_speed)/60.0);
         }
 
         cam_pos[1] = gridheight(cam_pos[0], cam_pos[2]) + craft_height;
+        angular_momentum = scale(angular_momentum, 0.5) + scale(cross(rot(.{0,1,0}, cam_rot), .{0,1,0}), 0.01);
     }
 
     const near_ground = math.clamp(1 - groundheight, 0, 1);
 
-//     const time = @intToFloat(f32, frame) / 60;
-//     cam_offset = v3{0, @cos(time*60), 0} * full(near_ground * 0.002);
+
+    const throttle_speed = 0.03;
+    if (gamepad.down)
+        throttle -= throttle_speed;
+    if (gamepad.up)
+        throttle += throttle_speed;
+    throttle = math.clamp(throttle, 0, 1);
+
+    const turn_acc = 0.2;
+    const trim_speed = 0.002;
+    const turn_reset = 0.3;
+
+    if (gamepad.button2) {
+        if (yoke.up)
+            trim[1] -= trim_speed;
+        if (yoke.down)
+            trim[1] += trim_speed;
+        steer[1] = moveTo(steer[1], trim[1], turn_reset);
+        if (yoke.left)
+            trim[2] += trim_speed;
+        if (yoke.right)
+            trim[2] -= trim_speed;
+        steer[2] = moveTo(steer[2], trim[2], turn_reset);
+        if (gamepad.right)
+            trim[0] -= trim_speed;
+        if (gamepad.left)
+            trim[0] += trim_speed;
+        if (gamepad.button1)
+            trim = .{0,0,0};
+        steer[0] = moveTo(steer[0], trim[0], turn_reset);
+    } else {
+        if (yoke.up)
+            steer[1] -= turn_acc;
+        if (yoke.down)
+            steer[1] += turn_acc;
+        if (!yoke.up and !yoke.down)
+            steer[1] = moveTo(steer[1], trim[1], turn_reset);
+        if (yoke.left)
+            steer[2] += turn_acc;
+        if (yoke.right)
+            steer[2] -= turn_acc;
+        if (!yoke.left and !yoke.right)
+            steer[2] = moveTo(steer[2], trim[2], turn_reset);
+        if (gamepad.right)
+            steer[0] -= turn_acc;
+        if (gamepad.left)
+            steer[0] += turn_acc;
+        if (!gamepad.right and !gamepad.left)
+            steer[0] = moveTo(steer[0], trim[0], turn_reset);
+    }
+
+    steer = @maximum(v3{-1,-1,-1}, @minimum(v3{1,1,1}, steer));
+
+
+    const drag_min = 0.02;
+    const thrust = 0.035;
+    const gravity = -0.1;
+    _ = gravity;
+
+    var stalling: bool = false;
+    const control_area = 0.6;
+    const steer_angle = 0.5;
+    const base_aoa = 0.02;
+    const wing_drag: f32 = if (braking) 0.5 else 0.05;
+    const control_drag = 0.05;
+
+    const wing_main_right = wingForce(.{0, 1, base_aoa}, .{ 5,0,0}, 4.5, wing_drag, &stalling);
+    const wing_main_left = wingForce(.{0, 1, base_aoa},  .{-5,0,0}, 4.5, control_drag, &stalling);
+    const aileron_right = wingForce(.{0, 1, base_aoa + steer[2] * steer_angle}, .{4,0,0}, control_area, control_drag, &stalling);
+    const aileron_left = wingForce(.{0, 1, base_aoa + -steer[2] * steer_angle}, .{-4,0,0}, control_area, control_drag, &stalling);
+    const tail_vertical = wingForce(.{1, 0, 0}, .{0,0,10}, 2, control_drag, &stalling);
+    const rudder = wingForce(.{1, 0, steer[0] * steer_angle}, .{0,0,10}, control_area, control_drag, &stalling);
+    const tail_horizontal = wingForce(.{0, 1, 0.7*base_aoa}, .{0,0,10}, 1, control_drag, &stalling);
+    const elevator = wingForce(.{0, 1, 1.5*base_aoa - steer[1] * steer_angle}, .{0,0,10}, control_area, control_drag, &stalling);
+
+//     const external = artificialForce(from_axis(.{0, 0, 1}, 0), .{10,0,0}, .{0,0.1,0});
+
+    const acc =
+        wing_main_right.f + wing_main_left.f + tail_vertical.f + tail_horizontal.f
+        + elevator.f + aileron_left.f + aileron_right.f + rudder.f
+        + v3{0, gravity, 0}
+        + rot(.{0, 0, -thrust*throttle}, cam_rot)
+        + scale(ground_speed, -@minimum(30, drag_min) * len(ground_speed))
+    ;
+    _ = acc;
+    ground_speed += scale(acc, 1/60.0);
+    cam_pos += scale(ground_speed, 1.0/60.0 * 2.0/3.0);
+
+    const torque = wing_main_right.trq + wing_main_left.trq + tail_vertical.trq + tail_horizontal.trq
+                + elevator.trq + aileron_left.trq + aileron_right.trq + rudder.trq;
+    angular_momentum += scale(torque, 1.0/60.0);
+
+    const omega = angularSpeed();
+    if (!all(omega == v3{0,0,0}))
+        cam_rot = mult(from_axis(scale(omega, 1.0/len(omega)), len(omega) / math.tau * 360), cam_rot);
+//         cam_rot = mult(cam_rot, from_axis(scale(omega, 1.0/len(omega)), len(omega) / math.tau * 360));
+
+    cam_rot = norm(cam_rot);
+
+
 
     const current_biome = biome(cam_pos[0], cam_pos[2]);
     w4.PALETTE[0] = current_biome.sky;
@@ -384,8 +391,8 @@ export fn update() void {
 
     w4.DRAW_COLORS.fill = 0;
     w4.DRAW_COLORS.outline = 1;
-    circle(72 + controls_size/2 + @floatToInt(i32, @round(controls_size * 0.9 * -steer[2] / 2)),
-        screen_h + 19 + @floatToInt(i32, @round(controls_size * 0.9  * steer[1] / 2)), 2);
+    circle(72 + controls_size/2 + @floatToInt(i32, @round(controls_size * 0.9 * -curt(steer[2]) / 2)),
+        screen_h + 19 + @floatToInt(i32, @round(controls_size * 0.9  * curt(steer[1]) / 2)), 2);
 
     w4.DRAW_COLORS.fill = 1;
     w4.vline(72 + controls_size/2 + @floatToInt(i32, @round(controls_size * 0.9 * -steer[0] / 2)),
@@ -412,7 +419,7 @@ export fn update() void {
     w4.blit(&degrees_text, 24, heading_display_y+6, 3,3, w4.BLIT_1BPP);
 
     w4.blit(&speed_text, 38, heading_display_y, 16,4, w4.BLIT_1BPP);
-    num(50, heading_display_y+6, @floatToInt(u32, len(surface_speed) * 100 * knots));
+    num(50, heading_display_y+6, @floatToInt(u32, len(ground_speed) * 100 * knots));
     w4.blit(&knots_text, 56, heading_display_y+8, 8,4, w4.BLIT_1BPP);
 
     const pitch_display_y = screen_h+21;
@@ -435,7 +442,7 @@ export fn update() void {
     var altwarn = false;
     var future: f32 = 0;
     while (future < 40) : (future += 1) {
-        const nextpos = cam_pos + scale(surface_speed, future * 4 / 60);
+        const nextpos = cam_pos + scale(ground_speed, future * 4 / 60);
         const nextheight = nextpos[1] - gridheight(nextpos[0], nextpos[2]);
         if (nextheight < 0.011)
             altwarn = true;
@@ -471,24 +478,16 @@ export fn update() void {
 //     w4.PALETTE[3] += 0x070503;
     w4.DRAW_COLORS.fill = 1;
     w4.DRAW_COLORS.outline = 3;
-//     print("{d:.2}\n{d:.2}\n{d:.2}", .{surface_speed[0], surface_speed[1], surface_speed[2]});
-//     print("{d:.2}\n{d:.2}", .{pitch_aoa, lift});
-
 
 
     // DEBUG
 
+//     const c = rot(.{0,0,-1}, cam_rot);
     const print_vals = [_]f32{
-//         aileron_right.trq[2] * 100,
-//         aileron_left.trq[2] * 100,
-        aileron_left.relair[1],
-        aileron_right.relair[1],
+//         steer[1]
 //         wing_main_left.aoa,
 //         tail_vertical.aoa,
 //         tail_horizontal.aoa,
-        angular_momentum[0]*100,
-        angular_momentum[1]*100,
-        angular_momentum[2]*100,
     };
 
 
@@ -504,40 +503,32 @@ export fn update() void {
             w4.blit(&numbers[10], 2, print_y, 4, 6, w4.BLIT_1BPP);
         }
     }
-//     print("{d:.2}\n{d:.2}", .{});
 
     frame += 1;
 }
 
 
-/// A null angle is the reasonable default orientation relative to the plane.
 /// Result is actually plain acceleration.
-fn wingForce(angle: vers, pos: v3, area: f32, drag: f32, stalling: *bool) struct { f: v3, trq: v3, relair: v3 } {
+fn wingForce(normal: v3, pos: v3, area: f32, drag: f32, stalling: *bool) struct { f: v3, trq: v3 } {
     _ = drag;
     _ = area;
-    const stall_start = 22;
-    const stall_reduction = 0.05;
+    _ = stalling;
+    const wing_pos = rot(scale(pos, 1.0 / 300.0), cam_rot);
+    const surface = rot(scale(normal, area / len(normal)), cam_rot);
 
-    const wing_angle = mult(cam_rot, angle);
-    const relative_air = rot(-surface_speed, conj(wing_angle));// - cross(angularSpeedInCam(), scale(pos, 1.0 / 300.0));
+    const rotational_wind = cross(angularSpeed(), wing_pos);
+    const total_wind = ground_speed - rotational_wind;
+    const attack = dot(-total_wind, surface);
+//     const aoa = attack /
+//     const additional
 
-    const a = len(v2{relative_air[1], relative_air[2]});
-    const pitch_aoa = std.math.atan2(f32, relative_air[1]/a, relative_air[2]/a) / math.pi * 180;
+    const force = scale(surface, attack * len(total_wind))
+            + scale(total_wind, -attack * attack / len(total_wind) * drag * area);// - scale(relative_air, len(relative_air) * drag)
+    const torque = cross(wing_pos, force);
 
-    const stall_amount = math.clamp((@fabs(pitch_aoa)-@as(f32, stall_start))*0.2, 0.0, 1.0);
-
-    const lift = math.clamp(pitch_aoa * area, -5, 5) * (1 - (1-stall_reduction) * stall_amount);
-    const speed_squared = dot(relative_air, relative_air);
-
-    stalling.* = stalling.* or stall_amount > 0.1;
-    const plane_force = v3{0, lift * speed_squared, 0};
-    const force = rot(plane_force, wing_angle);// - scale(relative_air, len(relative_air) * drag)
-    const torque = cross(rot(scale(pos, 1.0 / 300.0), cam_rot), force);
-
-    return .{ .f = force, .trq = torque, .relair = relative_air };
+    return .{ .f = force, .trq = torque };
 }
 
-/// A null angle is the reasonable default orientation relative to the plane.
 /// Result is actually plain acceleration.
 fn artificialForce(angle: vers, pos: v3, plane_force: v3) struct { f: v3, trq: v3, relair: v3 } {
     const area = 1;
@@ -545,7 +536,7 @@ fn artificialForce(angle: vers, pos: v3, plane_force: v3) struct { f: v3, trq: v
     const stall_reduction = 0.05;
 
     const wing_angle = mult(angle, cam_rot);
-    const relative_air = -rot(surface_speed, conj(wing_angle));// - cross(angularSpeedInCam(), scale(pos, 1.0 / 300.0));
+    const relative_air = -rot(ground_speed, conj(wing_angle));// - cross(angularSpeedInCam(), scale(pos, 1.0 / 300.0));
 
     const a = len(v2{relative_air[1], relative_air[2]});
     const pitch_aoa = std.math.atan2(f32, relative_air[1]/a, relative_air[2]/a) / math.pi * 180;
@@ -564,10 +555,8 @@ fn artificialForce(angle: vers, pos: v3, plane_force: v3) struct { f: v3, trq: v
 fn startGame() void {
     state = .running;
     cam_pos = cam_start;
-    cam_rot = rot_half;
-    cam_rot = rot_quart;
-    surface_speed = v3{0,0,1};
-    surface_speed = v3{-1,0,0};
+    cam_rot = cam_default;
+    ground_speed = comptime rot(v3{0,0,-1}, cam_default);
     angular_momentum = v3{0,0,0};
     throttle = 1;
     steer = v3{0,0,0};
@@ -1017,6 +1006,9 @@ fn any(v: anytype) bool {
     return @reduce(.Or, v);
 }
 
+fn curt(v: f32) f32 {
+    return math.copysign(f32, @sqrt(@fabs(v)), v);
+}
 
 pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace) noreturn {
     _ = trace;
