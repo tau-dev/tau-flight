@@ -8,23 +8,24 @@ const v3 = @Vector(3, f32);
 const v2 = @Vector(2, f32);
 // const u3 = @Vector(2, u32);
 const iv3 = @Vector(3, i32);
+const iv2 = @Vector(2, i32);
 const vers = @Vector(4, f32); // 1, j, k, l
 
 // One world unit := 200m.
 const knots = 1.943844 * 2.0; // knots / (m/s)
-const craft_height = 0.008;
+const craft_height = 0.01;
 const rot_null = vers{1, 0, 0, 0};
 const rot_half = vers{0, 0, 1, 0};
 const rot_quart = norm(vers{1, 0, 1, 0});
 const screen_w = 160;
 const screen_h = 120;
-const fov_fac = 1.2;
+const fov_fac = 1.0;
 const Depth = u8;
 const depth_scale = 255;
 // const size = 160;
 const relative_max_depth = 30;
 var max_depth: f32 = relative_max_depth;
-const runway1 = grid(0, 0) + v3{0, 1, 0};
+const runway1 = grid(-9, -9) + v3{0, 0.4, 0};
 
 const Biome = packed struct {
     const Bytes = [@sizeOf(Biome)]u8;
@@ -52,10 +53,16 @@ const Biome = packed struct {
 };
 
 const biomes = [_]Biome{
+//     .{
+//         .sky = 0x7cb9cb, // blueish white
+//         .ground1 = 0x5e7b60, // light green
+//         .ground2 = 0x50605b, // dark green
+//         .height_scale = 102,
+//     },
     .{
-        .sky = 0x7cb9cb, // blueish white
-        .ground1 = 0x5e7b60, // light green
-        .ground2 = 0x50605b, // dark green
+        .sky = 0x0cb9cb, // blueish white
+        .ground1 = 0x208010, // light green
+        .ground2 = 0x104808, // dark green
         .height_scale = 102,
     },
 //     .{
@@ -68,10 +75,10 @@ const biomes = [_]Biome{
 
 export fn start() void {
     w4.PALETTE.* = .{
-        0x6cb9cb, // sky
-        0x5e8360, // light green
-        0x405b4b, // dark green
-        0x664f4e, // brown
+        0xffffff,
+        0xffff00,
+        0x000000,
+        0x553300, // brown
     };
     w4.SYSTEM_FLAGS.preserve_framebuffer = true;
     w4.SYSTEM_FLAGS.hide_gamepad_overlay = true;
@@ -81,7 +88,7 @@ fn adsr(a: u8, d: u8, s: u8, r: u8) u32 {
     return (@as(u32, a) << 24) + (@as(u32, d) << 16) + @as(u32, s) + (@as(u32, r) << 8);
 }
 
-const cam_start = v3{ 0, 2, 10 };
+const cam_start = v3{ -9, 2, 12 };
 var cam_pos = cam_start;
 const cam_default = from_axis(.{0, 1, 0}, 0);
 
@@ -92,34 +99,32 @@ var controls_position = v3{0,0,0}; // pitch,roll,yaw
 var angular_momentum = v3{0,0,0};
 
 const moment_of_inertia = scale(v3{1,1,1}, 0.2);//2,3,1?
-
-comptime {
-    const base = v3{1, 2, 3};
-    const rotated = rot(base, rot_null);
-    if (!(all(rotated == base)))
-        @compileLog("{}", rotated);
-}
+var height_rel_to_ground: bool = false;
+var prev_gamepad: w4.Input = std.mem.zeroInit(w4.Input, .{});
 
 
 var depth: [screen_w][screen_h]Depth = undefined;
 var state: enum {
     begin,
-    running,
+    run_below_height,
     dead,
 } = .begin;
 
 var fatality: enum {
     crash,
+    exploded,
 } = .crash;
 
 var frame: u32 = 0;
-var altitude: f32 = 100;
 var cam_offset: v3 = v3{0,0,0};
 var ground_normal: v3 = undefined;
 var steer: v3 = v3{0,0,0};
 var trim: v3 = v3{0,0,0};
 var throttle: f32 = 1;
+var landed = false;
 
+
+var rocket = Entity{.pos = .{0,5,0}, .heading = rot_null};
 
 export fn update() void {
     if (state == .begin) {
@@ -145,7 +150,8 @@ export fn update() void {
         w4.DRAW_COLORS.fill = 2;
         w4.DRAW_COLORS.outline = 0;
         const cause = switch (fatality) {
-            .crash => "     CRASHED"
+            .crash =>     "     CRASHED"
+            .exploded, => "     EXPLODED"
         };
         w4.text(cause, 10, 10);
         w4.DRAW_COLORS.fill = 1;
@@ -158,33 +164,6 @@ export fn update() void {
     const gamepad = w4.GAMEPAD[0];
     const yoke = w4.GAMEPAD[1];
 
-    const groundheight = cam_pos[1] - gridheight(cam_pos[0], cam_pos[2]);
-    const max_impact = 0.04; // 12m/s
-    ground_normal = v3{
-        -(gridheight(cam_pos[0]+0.05, cam_pos[1]) - gridheight(cam_pos[0]-0.05, cam_pos[1])) / 0.1,
-        1,
-        -(gridheight(cam_pos[0], cam_pos[1]+0.05) - gridheight(cam_pos[0], cam_pos[1]-0.05)) / 0.1,
-    };
-    ground_normal = scale(ground_normal, 1/len(ground_normal));
-
-    const landed = groundheight <= craft_height;
-    const braking = throttle == 0 and gamepad.down;
-    if (landed) {
-        const impact_speed = dot(ground_speed, ground_normal);
-        if (@fabs(impact_speed) > max_impact) {
-            state = .dead;
-        } else {
-            ground_speed -= scale(ground_normal, impact_speed);
-            // 9m/s² brakes, oh well
-            if (braking)
-                ground_speed -= scale(ground_speed, 0.03/len(ground_speed)/60.0);
-        }
-
-        cam_pos[1] = gridheight(cam_pos[0], cam_pos[2]) + craft_height;
-        angular_momentum = scale(angular_momentum, 0.5) + scale(cross(rot(.{0,1,0}, cam_rot), .{0,1,0}), 0.01);
-    }
-
-    const near_ground = math.clamp(1 - groundheight, 0, 1);
 
 
     const throttle_speed = 0.03;
@@ -213,6 +192,8 @@ export fn update() void {
             trim[0] -= trim_speed;
         if (gamepad.left)
             trim[0] += trim_speed;
+
+
         if (gamepad.button1)
             trim = .{0,0,0};
         steer[0] = moveTo(steer[0], trim[0], turn_reset);
@@ -235,7 +216,13 @@ export fn update() void {
             steer[0] += turn_acc;
         if (!gamepad.right and !gamepad.left)
             steer[0] = moveTo(steer[0], trim[0], turn_reset);
+
+
+        if (gamepad.button1 and !prev_gamepad.button1) {
+            height_rel_to_ground = !height_rel_to_ground;
+        }
     }
+    const braking = throttle == 0 and gamepad.down;
 
     steer = @maximum(v3{-1,-1,-1}, @minimum(v3{1,1,1}, steer));
 
@@ -248,20 +235,18 @@ export fn update() void {
     var stalling: bool = false;
     const control_area = 0.6;
     const steer_angle = 0.5;
-    const base_aoa = 0.02;
+    const base_aoa: f32 = if (landed) 0 else 0.02;
     const wing_drag: f32 = if (braking) 0.5 else 0.05;
     const control_drag = 0.05;
 
-    const wing_main_right = wingForce(.{0, 1, base_aoa}, .{ 5,0,0}, 4.5, wing_drag, &stalling);
-    const wing_main_left = wingForce(.{0, 1, base_aoa},  .{-5,0,0}, 4.5, control_drag, &stalling);
+    const wing_main_right = wingForce(.{-0.1, 1, base_aoa}, .{ 5,0,0}, 3.5, wing_drag, &stalling);
+    const wing_main_left = wingForce(.{0.1, 1, base_aoa},  .{-5,0,0}, 3.5, control_drag, &stalling);
     const aileron_right = wingForce(.{0, 1, base_aoa + steer[2] * steer_angle}, .{4,0,0}, control_area, control_drag, &stalling);
     const aileron_left = wingForce(.{0, 1, base_aoa + -steer[2] * steer_angle}, .{-4,0,0}, control_area, control_drag, &stalling);
     const tail_vertical = wingForce(.{1, 0, 0}, .{0,0,10}, 2, control_drag, &stalling);
     const rudder = wingForce(.{1, 0, steer[0] * steer_angle}, .{0,0,10}, control_area, control_drag, &stalling);
-    const tail_horizontal = wingForce(.{0, 1, 0.7*base_aoa}, .{0,0,10}, 1, control_drag, &stalling);
+    const tail_horizontal = wingForce(.{0, 1, 0.7*base_aoa}, .{0,0,10}, control_area, control_drag, &stalling);
     const elevator = wingForce(.{0, 1, 1.5*base_aoa - steer[1] * steer_angle}, .{0,0,10}, control_area, control_drag, &stalling);
-
-//     const external = artificialForce(from_axis(.{0, 0, 1}, 0), .{10,0,0}, .{0,0.1,0});
 
     const acc =
         wing_main_right.f + wing_main_left.f + tail_vertical.f + tail_horizontal.f
@@ -278,23 +263,58 @@ export fn update() void {
                 + elevator.trq + aileron_left.trq + aileron_right.trq + rudder.trq;
     angular_momentum += scale(torque, 1.0/60.0);
 
+
+
+    const altitude = cam_pos[1];
+    const groundheight = altitude - gridheight(cam_pos[0], cam_pos[2]);
+    const max_impact = 0.05; // 12m/s
+    ground_normal = v3{
+        -(gridheight(cam_pos[0]+0.05, cam_pos[1]) - gridheight(cam_pos[0]-0.05, cam_pos[1])),
+        1,
+        -(gridheight(cam_pos[0], cam_pos[1]+0.05) - gridheight(cam_pos[0], cam_pos[1]-0.05)),
+    };
+    ground_normal = scale(ground_normal, 1/len(ground_normal));
+    const impact_speed = dot(ground_speed, ground_normal);
+    const near_ground = math.clamp(1 - groundheight, 0, 1);
+
+    landed = groundheight <= craft_height;
+
+
+    if (landed) {
+        if (@fabs(impact_speed) > max_impact) {
+            state = .dead;
+            fatality = .crash;
+        } else {
+            ground_speed -= scale(ground_normal, impact_speed);
+            // 9m/s² brakes, oh well
+            if (braking)
+                ground_speed -= scale(ground_speed, 0.03/len(ground_speed)/60.0);
+        }
+
+        cam_pos[1] = gridheight(cam_pos[0], cam_pos[2]) + craft_height;
+        angular_momentum = scale(angular_momentum, 0.95) + scale(cross(rot(.{0,1,0}, mult(cam_rot, from_axis(.{1,0,0}, 1))), .{0,1,0}), 0.0002);
+    }
+
     const omega = angularSpeed();
-    if (!all(omega == v3{0,0,0}))
-        cam_rot = mult(from_axis(scale(omega, 1.0/len(omega)), len(omega) / math.tau * 360), cam_rot);
-//         cam_rot = mult(cam_rot, from_axis(scale(omega, 1.0/len(omega)), len(omega) / math.tau * 360));
-
-    cam_rot = norm(cam_rot);
-
+    cam_rot = versnorm(mult(from_omega(omega), cam_rot));
 
 
     const current_biome = biome(cam_pos[0], cam_pos[2]);
     w4.PALETTE[0] = current_biome.sky;
     w4.PALETTE[1] = current_biome.ground1;
     w4.PALETTE[2] = current_biome.ground2;
-//     w4.PALETTE[0..3].* = .{ current_biome.sky, current_biome.ground1, current_biome.ground2 };
 
     std.mem.set(u8, w4.FRAMEBUFFER[0..screen_w*screen_h/4], 0);
     std.mem.set(Depth, @ptrCast(*[screen_w*screen_h]Depth, &depth), math.maxInt(Depth));
+
+
+
+    const rocket_speed = 2.0;
+    const rocket_forward = rot(.{0,0,1}, rocket.heading);
+    const rocket_turnspeed = 0.009;
+    const rocket_delta = norm(cam_pos - rocket.pos);
+    rocket.heading = mult(from_omega(scale(-cross(rocket_delta, rocket_forward), rocket_turnspeed)), rocket.heading);
+    rocket.pos += scale(rocket_forward, rocket_speed / 60.0);
 
 
     // ==================== DRAWING ====================
@@ -319,21 +339,22 @@ export fn update() void {
                     grid(u, v+groundscale),
                     grid(u+groundscale, v+groundscale),
                 };
-                quad(c, 1, 2); // Tris
+                const col = @as(u8, @boolToInt(@mod(u+v, 2) < 1));
+                quad(c, 1+col, 1+col); // Tris
 //                 const col = @floatToInt(u8, @mod(u + v, 2)) + 1;
 //                 quad(c, col, col); // Squares
 //                 quad(c, col, 3 - col); // Stripes
 
-                const level = 0.5;
-                const water = c[0][1] < level or c[1][1] < level or c[2][1] < level or c[3][1] < level;
-                if (water) {
-                    quad(.{
-                        v3{u, level, v},
-                        v3{u+1, level, v},
-                        v3{u, level, v+1},
-                        v3{u+1, level, v+1},
-                    }, 0, 0);
-                }
+//                 const level = 0.5;
+//                 const water = c[0][1] < level or c[1][1] < level or c[2][1] < level or c[3][1] < level;
+//                 if (water) {
+//                     quad(.{
+//                         v3{u, level, v},
+//                         v3{u+1, level, v},
+//                         v3{u, level, v+1},
+//                         v3{u+1, level, v+1},
+//                     }, 0, 0);
+//                 }
             }
         }
     }
@@ -346,17 +367,21 @@ export fn update() void {
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 1;
 //     tooltip(v3{-0.5, 2, -9.5}, 1337);
-    tooltip(v3{-1.25, 0.9, -0.75}, &TEE);
+//     tooltip(v3{-1.25, 0.9, -0.75}, &TEE);
+
+    const rocket_r = 0.03;
+    rocket.paint(.{0,0,0.2}, .{rocket_r,0,0}, .{-rocket_r,0,0}, 3);
+    rocket.paint(.{0,0,0.2}, .{0,rocket_r,0}, .{0,-rocket_r,0}, 3);
+    rocket.paint(.{rocket_r,0,0}, .{0,rocket_r,0}, .{0,-rocket_r,0}, 3);
+    rocket.paint(.{-rocket_r,0,0}, .{0,rocket_r,0}, .{0,-rocket_r,0}, 3);
 
 
 
-    // ======================== INSTRUMMENTS ========================
+
+    // ======================== INSTRUMENTS ========================
 
     std.mem.set(u8, w4.FRAMEBUFFER[screen_w*screen_h/4..], 255);
     w4.DRAW_COLORS.fill = 1;
-//     w4.oval(6, screen_h+6, 28, 28);
-//     w4.oval(120, screen_h+6, 28, 28);
-//     circle(20, screen_h + 20, 14);
 
     // Throttle
     const throttle_x = 110;
@@ -368,19 +393,7 @@ export fn update() void {
     w4.rect(throttle_x-4, screen_h + 32 - @floatToInt(i32, throttle*28), 12, 4);
 
 
-    // Altimeter
-//     w4.DRAW_COLORS.fill = 2;
-//     circle(140, screen_h + 20, 14);
-//     w4.DRAW_COLORS.outline = 4;
-//     w4.DRAW_COLORS.fill = 0;
-//     w4.blit(&alti_text, 135, screen_h+25, 16, 4, w4.BLIT_1BPP);
-//     w4.DRAW_COLORS.fill = 1;
-//     hand(140, screen_h + 20, 12, -groundheight * 1.0);
-//     w4.DRAW_COLORS.fill = 1;
-//     hand(140, screen_h + 20, 8, -groundheight * 0.3);
-
-
-    // Yoke
+    // RADAR
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 2;
     const controls_size = 31;
@@ -399,12 +412,7 @@ export fn update() void {
         screen_h + 20, 3);
 
 
-//     hand(140, screen_h + 20, 8, -groundheight * 0.5);
-
-//     w4.DRAW_COLORS.fill = 0;
-//     const h = math.absInt(@floatToInt(i32, rot(.{0, 1, 0}, cam_rot)[1] * 14)) catch return;
-//     w4.oval(6, screen_h+20-h, 28, 2*h);
-
+    // INDICATORS
     w4.DRAW_COLORS.fill = 0;
     w4.DRAW_COLORS.outline = 1;
     const forward = rot(.{0, 0, 1}, cam_rot);
@@ -429,14 +437,51 @@ export fn update() void {
     if (@round(pitch) > 0)
         w4.blit(&numbers[10], 6, pitch_display_y+6, 4, 6, w4.BLIT_1BPP);
 
-    w4.blit(&alti_text, 42, pitch_display_y, 16, 4, w4.BLIT_1BPP);
-    num(50, pitch_display_y+6, @floatToInt(u32, groundheight * 1000));
+
+    w4.blit(if (height_rel_to_ground) &ground_text else &alti_text, 42, pitch_display_y, 16, 4, w4.BLIT_1BPP);
+    num(50, pitch_display_y+6, @floatToInt(u32, (if (height_rel_to_ground) groundheight else altitude + 2) * 1000));
     w4.blit(&feet_text, 48, pitch_display_y+8, 16,4, w4.BLIT_1BPP);
 
 
+
+    // RADAR
+    w4.DRAW_COLORS.fill = 3;
+    w4.DRAW_COLORS.outline = 2;
+    circle(radar_x, radar_y, radar_radius);
+    w4.pixel(radar_x, radar_y, 1);
+    radar(.{runway1[0], runway1[2]}, heading, 3);
+    radar(.{runway1[0], runway1[2]+1}, heading, 3);
+    radar(.{runway1[0], runway1[2]-1}, heading, 3);
+
+    radar(.{rocket.pos[0], rocket.pos[2]}, heading, @as(u8, @boolToInt(frame % 4 < 2)) * 3);
+
+
+    // ARTIFICIAL HORIZON
+    w4.DRAW_COLORS.fill = 2;
+
+    const up_in_cam = rot(.{0,1,0}, conj(cam_rot));
+
+    const screen_up_vec = v2{up_in_cam[0], up_in_cam[1]};
+    const screen_up = scale2(screen_up_vec, 1/len(screen_up_vec));
+    const screen_right = v2{screen_up[1], -screen_up[0]};
+    const center = v2{screen_w / 2, screen_h / 2};
+
+    var x: f32 = -90;
+    while (x < 90) : (x += 10) {
+        const l = math.clamp(10 - @fabs(x + pitch + 10), 0, 2) * 4;
+        if (l > 0) {
+            const d = scale2(screen_up, (x + pitch) *3);
+            const right = center + d + scale2(screen_right, l);
+            const left = center + d - scale2(screen_right, l);
+            w4.line(@floatToInt(i32, right[0]), @floatToInt(i32, screen_h-right[1]),
+                    @floatToInt(i32, left[0]), @floatToInt(i32, screen_h-left[1]));
+        }
+    }
+
+
+    // WARNINGS
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 0;
-
     var y: i32 = 8;
 
     var altwarn = false;
@@ -471,7 +516,6 @@ export fn update() void {
     }
 
 
-
     w4.DRAW_COLORS.fill = 0;
     w4.DRAW_COLORS.outline = 1;
     w4.rect(0,0, 160, screen_h);
@@ -480,14 +524,17 @@ export fn update() void {
     w4.DRAW_COLORS.outline = 3;
 
 
-    // DEBUG
+
+
+
+
+    // =========== DEBUG ============
 
 //     const c = rot(.{0,0,-1}, cam_rot);
     const print_vals = [_]f32{
-//         steer[1]
-//         wing_main_left.aoa,
-//         tail_vertical.aoa,
-//         tail_horizontal.aoa,
+        cam_pos[0],
+        cam_pos[2],
+        impact_speed,
     };
 
 
@@ -505,8 +552,36 @@ export fn update() void {
     }
 
     frame += 1;
+    prev_gamepad = gamepad;
 }
 
+const radar_x = 138;
+const radar_y = screen_h + 20;
+const radar_radius = 18;
+fn radar(point: v2, angle: f32, col: u8) void {
+    const p = v2{
+        point[0] - cam_pos[0],
+        point[1] - cam_pos[2],
+    };
+    const x = @round( @cos(angle) * p[0] - @sin(angle) * p[1] );
+    const y = @round( @sin(angle) * p[0] + @cos(angle) * p[1] );
+    if (len(v2{x,y}) < radar_radius)
+        w4.pixel(@intCast(u32, radar_x + @floatToInt(i32, x)), @intCast(u32, radar_y + @floatToInt(i32, y)), col);
+}
+
+
+const Entity = struct {
+    pos: v3,
+    heading: vers,
+
+    fn paint(self: Entity, as: v3, bs: v3, cs: v3, col: u8) void {
+        tri(
+            rot(as, self.heading) + self.pos,
+            rot(bs, self.heading) + self.pos,
+            rot(cs, self.heading) + self.pos,
+        col);
+    }
+};
 
 /// Result is actually plain acceleration.
 fn wingForce(normal: v3, pos: v3, area: f32, drag: f32, stalling: *bool) struct { f: v3, trq: v3 } {
@@ -553,7 +628,7 @@ fn artificialForce(angle: vers, pos: v3, plane_force: v3) struct { f: v3, trq: v
 
 
 fn startGame() void {
-    state = .running;
+    state = .run_below_height;
     cam_pos = cam_start;
     cam_rot = cam_default;
     ground_speed = comptime rot(v3{0,0,-1}, cam_default);
@@ -629,8 +704,10 @@ fn cube(p: v3, h: f32, w: f32, d: f32, col: u8) void {
     _ = col;
     const c1 = 2;
     const c2 = 3;
-    if (all(cam_pos > p) and all(cam_pos < p + v3{w, h, d}))
+    if (all(cam_pos > p) and all(cam_pos < p + v3{w, h, d})) {
         state = .dead;
+        fatality = .crash;
+    }
 
     rect(p + v3{w, 0, 0}, .{0, h, 0}, .{-w,0, 0}, c1, c2);
     rect(p + v3{0, 0, d}, .{0, h, 0}, .{w, 0, 0}, c1, c2);
@@ -657,6 +734,19 @@ fn paintRunway(origin: v3) void {
         origin + v3{-width, 0, length},
         origin + v3{-width, 0, -length},
     }, 3, 3);
+
+    const stripe_width = 0.02;
+    const stripe_length = 0.08;
+    const stripe_height = 0.005;
+    var x: f32 = -length*0.9;
+    while (x <= length*0.9) : (x += 0.5) {
+        quad(.{
+            origin + v3{stripe_width, stripe_height, stripe_length + x},
+            origin + v3{stripe_width, stripe_height, -stripe_length + x},
+            origin + v3{-stripe_width, stripe_height, stripe_length + x},
+            origin + v3{-stripe_width, stripe_height, -stripe_length + x},
+        }, 0, 0);
+    }
 }
 
 
@@ -814,6 +904,14 @@ fn put(x: u32, y: u32, dpth: f32, col: u8) void {
     }
 }
 
+fn angularSpeed() v3 {
+    return rot(angularSpeedInCam(), conj(cam_rot));
+}
+fn angularSpeedInCam() v3 {
+    return rot(angular_momentum, cam_rot) / moment_of_inertia;
+}
+
+
 fn clampx(x: i32) u32 {
     if (x < 0) {
 //         w4.pixel(100, 2, 3);
@@ -858,8 +956,8 @@ const Projection = struct {
 fn project(x: v3) Projection {
     const dist = x[2];
     return .{
-        .x = clamptoint((x[0] / dist + 0.5) * screen_w*fov_fac),
-        .y = clamptoint((x[1] / dist + 0.5 * @as(f32, screen_h)/screen_w) * screen_w*fov_fac),
+        .x = clamptoint((x[0] / dist*fov_fac + 0.5) * screen_w),
+        .y = clamptoint((x[1] / dist*fov_fac + 0.5 * @as(f32, screen_h)/screen_w) * screen_w),
         .z = 1 / x[2],
     };
 }
@@ -891,29 +989,59 @@ fn biome(x: f32, y: f32) Biome {
 
 
 fn terrainHeight(x: f32, y: f32) f32 {
-    const bim = biome(x, y);
-    const u = x / 3;
-    const v = y / 3;
-    return ((@fabs(@sin(u)) + @fabs(@sin(v+0.3*u)) + 0.2*@sin(u*6.7) + 0.2*@cos(v*6.9))
-        * (1 + (@cos(u/21.7) + @sin(v/22.3))*0.2 ))
-        * @intToFloat(f32, bim.height_scale) / 100;
+//     const bim = biome(x, y);
+    const u = x + 105;
+    const v = y + 160;
+    return perlin(.{u, v}, 10) * 5 -@fabs(perlin(.{u, v + 100}, 5) * 5) + perlin(.{u, v + 500}, 3) * 3;
 }
+
+fn perlin(v: v2, sc: f32) f32 {
+    const cell = v2{@mod(v[0] / sc, 1), @mod(v[1] / sc, 1)};
+    const lower_x = @floatToInt(i32, @floor(v[0] / sc));
+    const lower_y = @floatToInt(i32, @floor(v[1] / sc));
+
+    const corners_x = [4]f32{
+        cell[0] * hash(lower_x, lower_y),
+        (cell[0]-1) * hash(lower_x+1, lower_y),
+        cell[0] * hash(lower_x, lower_y+1),
+        (cell[0]-1) * hash(lower_x+1, lower_y+1),
+    };
+    const corners_y = [4]f32{
+        cell[1] * hash(lower_x + 300, lower_y),
+        cell[1] * hash(lower_x+1  + 300, lower_y),
+        (cell[1]-1) * hash(lower_x + 300, lower_y+1),
+        (cell[1]-1) * hash(lower_x+1 + 300, lower_y+1),
+    };
+    return lerp(corners_x, cell) + lerp(corners_y, cell);
+}
+
+fn lerp(data: [4]f32, p: v2) f32 {
+    return (1-p[1]) * ((1-p[0]) * data[0] + p[0] * data[1])
+             + p[1] * ((1-p[0]) * data[2] + p[0] * data[3]);
+}
+
+fn hash(x: i32, y: i32) f32 {
+//     const u = @byteSwap(u32, @bitCast(u32, x)) *% 482216717;
+//     const v = @byteSwap(u32, @bitCast(u32, y)) *% 644439217;
+
+//     const d = @truncate(u16, (u >> 3) ^ (v << 11) ^ (u >> 7) ^ (v << 13));
+    const a = [2]i32{x,y};
+    const d = @truncate(u16, std.hash.Wyhash.hash(1337, &@bitCast([8]u8, a)));
+    const c = (@intToFloat(f32, d) / 65536 - 0.5) * 2;
+    return c * c * c;
+}
+
+
 
 fn gridheight(xs: f32, ys: f32) f32 {
     if (@fabs(xs - runway1[0]) < 0.5 and @fabs(ys - runway1[2]) < 2)
         return runway1[1];
+
     const x = @floor(xs);
     const y = @floor(ys);
     const u = @mod(xs, 1);
     const v = @mod(ys, 1);
     return (1-u) * ((1-v) * terrainHeight(x, y) + v * terrainHeight(x, y+1)) + u * ((1-v) * terrainHeight(x+1, y) + v * terrainHeight(x+1, y+1));
-}
-
-fn angularSpeed() v3 {
-    return rot(angularSpeedInCam(), conj(cam_rot));
-}
-fn angularSpeedInCam() v3 {
-    return rot(angular_momentum, cam_rot) / moment_of_inertia;
 }
 
 
@@ -947,6 +1075,9 @@ inline fn dot(a: anytype, b: anytype) f32 {
 inline fn scale(x: v3, y: f32) v3 {
     return x * @splat(3, y);
 }
+inline fn scale2(x: v2, y: f32) v2 {
+    return x * @splat(2, y);
+}
 
 fn cross(a: v3, b: v3) v3 {
     return .{
@@ -962,6 +1093,15 @@ fn cross(a: v3, b: v3) v3 {
 /// ax must be normalized
 fn from_axis(ax: v3, ang: f32) vers {
     const r = ang / 360 * math.pi;
+    return .{ @cos(r), ax[0] * @sin(r), ax[1] * @sin(r), ax[2] * @sin(r) };
+}
+
+/// ax must be normalized
+fn from_omega(om: v3) vers {
+    if (len(om) == 0)
+        return rot_null;
+    const r = len(om);
+    const ax = scale(om, 1/r);
     return .{ @cos(r), ax[0] * @sin(r), ax[1] * @sin(r), ax[2] * @sin(r) };
 }
 
@@ -982,7 +1122,11 @@ fn toEuler(x: vers) v3 {
     };
 }
 
-fn norm(x: vers) vers {
+fn norm(x: v3) v3 {
+    return x / @splat(3, @sqrt(dot(x,x)));
+}
+
+fn versnorm(x: vers) vers {
     return x / @splat(4, @sqrt(dot(x,x)));
 }
 
@@ -1058,10 +1202,16 @@ const feet_text = [8]u8{
     0b00000000, 0b10000100,
 };
 const alti_text = [8]u8{
-    0b11101001, 0b11010000,
-    0b10101000, 0b10010000,
-    0b11101000, 0b10010000,
-    0b10101100, 0b10010000,
+    0b11101000, 0b11100000,
+    0b10101000, 0b01000000,
+    0b11101000, 0b01000000,
+    0b10101110, 0b01000000,
+};
+const ground_text = [8]u8{
+    0b10101110, 0b11100000,
+    0b11101000, 0b01000000,
+    0b10101010, 0b01000000,
+    0b10101110, 0b01000000,
 };
 const speed_text = [8]u8{
     0b11011011, 0b10111010,

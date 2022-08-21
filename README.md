@@ -12,10 +12,12 @@ game on a desktop PC in Firefox or Chromium.
 
 Gamepad 2 (🄴/🄳, 🅂/🄵): Pitch, Roll
 
-Gamepad 1 (⭠ / ⭢, ⭡ / ⭣): Yaw, Throttle
+Gamepad 1 (⭠ / ⭢, ⭡ / ⭣ ): Yaw, Throttle
 
-Hold ⭣ on the ground to brake.
+Hold ⭣ at zero throttle to extend flaps and brake.
 
-Hold Trigger 1 (🅇) to trim the controls.
+Trigger 1 (🅇) to toggle the altimeter between ground (HGT) and sea level (ALT).
+
+Hold Trigger 2 (🅉 or 🄲) to trim the controls, Trigger 1 and Trigger 2 to reset the trim.
 
 Good luck, pilot!

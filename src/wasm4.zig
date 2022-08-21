@@ -17,7 +17,7 @@ pub const SCREEN_SIZE: u32 = 160;
 
 const assert = @import("std").debug.assert;
 
-const Input = packed struct {
+pub const Input = packed struct {
     button1: bool,
     button2: bool,
     pad1: bool,
