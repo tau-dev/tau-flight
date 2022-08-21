@@ -25,6 +25,9 @@ const depth_scale = 255;
 // const size = 160;
 const relative_max_depth = 30;
 var max_depth: f32 = relative_max_depth;
+
+const runway_width = 0.5;
+const runway_length = 3;
 const runway1 = grid(-9, -9) + v3{0, 0.4, 0};
 
 const Biome = packed struct {
@@ -74,12 +77,6 @@ const biomes = [_]Biome{
 };
 
 export fn start() void {
-    w4.PALETTE.* = .{
-        0xffffff,
-        0xffff00,
-        0x000000,
-        0x553300, // brown
-    };
     w4.SYSTEM_FLAGS.preserve_framebuffer = true;
     w4.SYSTEM_FLAGS.hide_gamepad_overlay = true;
 }
@@ -97,23 +94,23 @@ var cam_rot = rot_half;
 var ground_speed = v3{0,0,-1};
 var controls_position = v3{0,0,0}; // pitch,roll,yaw
 var angular_momentum = v3{0,0,0};
-
 const moment_of_inertia = scale(v3{1,1,1}, 0.2);//2,3,1?
 var height_rel_to_ground: bool = false;
 var prev_gamepad: w4.Input = std.mem.zeroInit(w4.Input, .{});
 
 
 var depth: [screen_w][screen_h]Depth = undefined;
-var state: enum {
+const State = enum {
     begin,
-    run_below_height,
-    dead,
-} = .begin;
+    run_with_missiles,
+};
+var gamestate = State.begin;
 
 var fatality: enum {
+    alive,
     crash,
     exploded,
-} = .crash;
+} = .alive;
 
 var frame: u32 = 0;
 var cam_offset: v3 = v3{0,0,0};
@@ -122,47 +119,82 @@ var steer: v3 = v3{0,0,0};
 var trim: v3 = v3{0,0,0};
 var throttle: f32 = 1;
 var landed = false;
+var missile_active = true;
 
 
-var rocket = Entity{.pos = .{0,5,0}, .heading = rot_null};
+var missile: Entity = undefined;
+var selected_mission: u8 = 0;
+
+
 
 export fn update() void {
-    if (state == .begin) {
-        std.mem.set(u8, w4.FRAMEBUFFER[0..], 0);
+    const gamepad = w4.GAMEPAD[0];
+    const yoke = w4.GAMEPAD[1];
+    frame += 1;
+
+    if (gamestate == .begin) {
+        w4.PALETTE.* = .{
+            0x000000,
+            0xffffff,
+            0x20cc20,
+            0x552200, // brown
+        };
+        w4.DRAW_COLORS.outline = 0;
         w4.DRAW_COLORS.fill = 3;
-        w4.DRAW_COLORS.outline = 1;
-        w4.text(
-            \\ You should have
-            \\ received a
-            \\ controls sheet.
-            \\
-            \\ Good luck, pilot.
-            \\
-            \\
-            \\
-            \\        [X]
-            , 4, 38);
-        if (w4.GAMEPAD[0].button1)
+        const Mission = struct { name: []const u8, state: State };
+        std.mem.set(u8, w4.FRAMEBUFFER[0..], 0);
+        const missions = [_]Mission{
+            .{ .name = "Escape the missile", .state = .run_with_missiles },
+            .{ .name = "Escape the missile", .state = .run_with_missiles },
+        };
+        if (gamepad.down and !prev_gamepad.down and selected_mission + 1 < missions.len)
+            selected_mission += 1;
+        if (gamepad.up and !prev_gamepad.up and selected_mission > 0)
+            selected_mission -= 1;
+
+        const start_height = 20;
+        for (missions) |m, i| {
+            if (i == selected_mission) {
+                const marker = if (frame % 40 < 20) "-" else ">";
+                w4.text(marker, 2, @intCast(i32, 10 * i + start_height));
+            }
+            w4.text(m.name, 10, @intCast(i32, 10 * i + start_height));
+        }
+
+
+//         w4.text(, 8, 18);
+        w4.DRAW_COLORS.fill = 2;
+        w4.text("Good luck, pilot.", 14, 140);
+        if (gamepad.button1) {
+            gamestate = missions[selected_mission].state;
             startGame();
+        }
+        prev_gamepad = gamepad;
         return;
-    } else if (state == .dead) {
+    } else if (fatality != .alive) {
         std.mem.set(u8, w4.FRAMEBUFFER[0..], 255);
         w4.DRAW_COLORS.fill = 2;
         w4.DRAW_COLORS.outline = 0;
         const cause = switch (fatality) {
-            .crash =>     "     CRASHED"
-            .exploded, => "     EXPLODED"
+            .crash =>     "     CRASHED",
+            .exploded => "     EXPLODED",
+            else => unreachable,
         };
         w4.text(cause, 10, 10);
         w4.DRAW_COLORS.fill = 1;
 //         w4.text("\n\n\n\n\n\n\n\n     R. I. P.\n\n\n\n\n\n\n\n  [R] to restart.", 8, 8);
-        w4.text(" Restart\n\n In\n\n Peace.\n\n\n\n\n\n\n   [X]", 45, 60);
-        if (w4.GAMEPAD[0].button1)
-            startGame();
+//         w4.text(" Restart\n\n In\n\n Peace.\n\n\n\n\n\n\n   [X]", 45, 60);
+        w4.text(" Restart\n\n In\n\n Peace.\n\n\n\n  [X]", 45, 60);
+        w4.DRAW_COLORS.fill = 2;
+        w4.text("[C] Menu", 92, 150);
+        if (gamepad.button1)
+            startGame()
+        else if (gamepad.button2)
+            gamestate = .begin;
+
+        prev_gamepad = gamepad;
         return;
     }
-    const gamepad = w4.GAMEPAD[0];
-    const yoke = w4.GAMEPAD[1];
 
 
 
@@ -275,14 +307,13 @@ export fn update() void {
     };
     ground_normal = scale(ground_normal, 1/len(ground_normal));
     const impact_speed = dot(ground_speed, ground_normal);
-    const near_ground = math.clamp(1 - groundheight, 0, 1);
+    const near_ground = math.clamp((1 - groundheight) * len(ground_speed), 0, 1);
 
     landed = groundheight <= craft_height;
 
 
     if (landed) {
         if (@fabs(impact_speed) > max_impact) {
-            state = .dead;
             fatality = .crash;
         } else {
             ground_speed -= scale(ground_normal, impact_speed);
@@ -309,12 +340,21 @@ export fn update() void {
 
 
 
-    const rocket_speed = 2.0;
-    const rocket_forward = rot(.{0,0,1}, rocket.heading);
-    const rocket_turnspeed = 0.009;
-    const rocket_delta = norm(cam_pos - rocket.pos);
-    rocket.heading = mult(from_omega(scale(-cross(rocket_delta, rocket_forward), rocket_turnspeed)), rocket.heading);
-    rocket.pos += scale(rocket_forward, rocket_speed / 60.0);
+    const missile_speed = 2.0;
+    const missile_forward = rot(.{0,0,1}, missile.heading);
+    const missile_turnspeed = 0.04;
+    const missile_delta = cam_pos - missile.pos;
+    if (missile_active) {
+        missile.heading = mult(from_omega(scale(-cross(norm(missile_delta), missile_forward), missile_turnspeed)), missile.heading);
+        missile.pos += scale(missile_forward, missile_speed / 60.0);
+
+        if (len(missile_delta) < 0.05) {
+            fatality = .exploded;
+        }
+    }
+
+    if (missile.pos[1] < gridheight(missile.pos[0], missile.pos[2]))
+        missile_active = false;
 
 
     // ==================== DRAWING ====================
@@ -369,11 +409,11 @@ export fn update() void {
 //     tooltip(v3{-0.5, 2, -9.5}, 1337);
 //     tooltip(v3{-1.25, 0.9, -0.75}, &TEE);
 
-    const rocket_r = 0.03;
-    rocket.paint(.{0,0,0.2}, .{rocket_r,0,0}, .{-rocket_r,0,0}, 3);
-    rocket.paint(.{0,0,0.2}, .{0,rocket_r,0}, .{0,-rocket_r,0}, 3);
-    rocket.paint(.{rocket_r,0,0}, .{0,rocket_r,0}, .{0,-rocket_r,0}, 3);
-    rocket.paint(.{-rocket_r,0,0}, .{0,rocket_r,0}, .{0,-rocket_r,0}, 3);
+    const missile_r = 0.03;
+    missile.paint(.{0,0,0.2}, .{missile_r,0,0}, .{-missile_r,0,0}, 3);
+    missile.paint(.{0,0,0.2}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
+    missile.paint(.{missile_r,0,0}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
+    missile.paint(.{-missile_r,0,0}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
 
 
 
@@ -383,7 +423,7 @@ export fn update() void {
     std.mem.set(u8, w4.FRAMEBUFFER[screen_w*screen_h/4..], 255);
     w4.DRAW_COLORS.fill = 1;
 
-    // Throttle
+    // THROTTLE
     const throttle_x = 110;
     w4.DRAW_COLORS.outline = 2;
     w4.DRAW_COLORS.fill = 3;
@@ -393,7 +433,7 @@ export fn update() void {
     w4.rect(throttle_x-4, screen_h + 32 - @floatToInt(i32, throttle*28), 12, 4);
 
 
-    // RADAR
+    // YOKE
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 2;
     const controls_size = 31;
@@ -401,6 +441,10 @@ export fn update() void {
     w4.DRAW_COLORS.fill = 2;
     w4.vline(72 + controls_size/2, screen_h + 4, controls_size);
     w4.hline(72, screen_h + 19, controls_size);
+    w4.DRAW_COLORS.fill = 4;
+    w4.DRAW_COLORS.outline = 2;
+    if (gamepad.button2)
+        w4.blit(&trim_text, 80, screen_h + 30, 16, 4, w4.BLIT_1BPP);
 
     w4.DRAW_COLORS.fill = 0;
     w4.DRAW_COLORS.outline = 1;
@@ -452,8 +496,8 @@ export fn update() void {
     radar(.{runway1[0], runway1[2]}, heading, 3);
     radar(.{runway1[0], runway1[2]+1}, heading, 3);
     radar(.{runway1[0], runway1[2]-1}, heading, 3);
-
-    radar(.{rocket.pos[0], rocket.pos[2]}, heading, @as(u8, @boolToInt(frame % 4 < 2)) * 3);
+    if (missile_active)
+        radar(.{missile.pos[0], missile.pos[2]}, heading, @as(u8, @boolToInt(frame % 4 < 2)) * 3);
 
 
     // ARTIFICIAL HORIZON
@@ -479,7 +523,7 @@ export fn update() void {
     }
 
 
-    // WARNINGS
+    // SOUND
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 0;
     var y: i32 = 8;
@@ -504,7 +548,24 @@ export fn update() void {
     if (frame % 10 == 0) {
 //         w4.tone(50, 70, 3, w4.TONE_PULSE1);
         w4.tone(50, 12, @floatToInt(u32, throttle * 100), w4.TONE_TRIANGLE);
+
+        const missile_max_volume_dist = 0.3;
+        const missile_volume = math.clamp(missile_max_volume_dist / dot(missile_delta, missile_delta), 0, 1);
+        if (missile_active) {
+//             w4.tone(100, 12, @floatToInt(u32, 50.0 * missile_volume), w4.TONE_NOISE);
+            const direction = rot(missile_delta, conj(cam_rot));
+            var mode = w4.TONE_NOISE | w4.TONE_MODE3;
+            const main_component = len(v2{direction[1], direction[2]});
+            if (direction[0] > main_component)
+                mode |= w4.TONE_PAN_RIGHT;
+            if (direction[0] < -main_component)
+                mode |= w4.TONE_PAN_LEFT;
+            w4.tone(90, 10, @floatToInt(u32, 50.0 * missile_volume), mode);
+        }
     }
+
+
+    // WARNINGS
     if (!landed) {
         if (altwarn)
             newline("ALTITUDE", &y);
@@ -551,7 +612,6 @@ export fn update() void {
         }
     }
 
-    frame += 1;
     prev_gamepad = gamepad;
 }
 
@@ -628,11 +688,12 @@ fn artificialForce(angle: vers, pos: v3, plane_force: v3) struct { f: v3, trq: v
 
 
 fn startGame() void {
-    state = .run_below_height;
+    fatality = .alive;
     cam_pos = cam_start;
     cam_rot = cam_default;
     ground_speed = comptime rot(v3{0,0,-1}, cam_default);
     angular_momentum = v3{0,0,0};
+    missile = Entity{.pos = .{0,5,0}, .heading = comptime from_axis(.{0, 1, 0}, 90)};
     throttle = 1;
     steer = v3{0,0,0};
     trim = v3{0,0,0};
@@ -705,7 +766,6 @@ fn cube(p: v3, h: f32, w: f32, d: f32, col: u8) void {
     const c1 = 2;
     const c2 = 3;
     if (all(cam_pos > p) and all(cam_pos < p + v3{w, h, d})) {
-        state = .dead;
         fatality = .crash;
     }
 
@@ -725,8 +785,8 @@ fn rect(p: v3, x: v3, y: v3, col1: u8, col2: u8) void {
 }
 
 fn paintRunway(origin: v3) void {
-    const width = 0.5;
-    const length = 2;
+    const width = runway_width;
+    const length = runway_length;
 
     quad(.{
         origin + v3{width, 0, length},
@@ -1034,7 +1094,7 @@ fn hash(x: i32, y: i32) f32 {
 
 
 fn gridheight(xs: f32, ys: f32) f32 {
-    if (@fabs(xs - runway1[0]) < 0.5 and @fabs(ys - runway1[2]) < 2)
+    if (@fabs(xs - runway1[0]) < runway_width and @fabs(ys - runway1[2]) < runway_length)
         return runway1[1];
 
     const x = @floor(xs);
