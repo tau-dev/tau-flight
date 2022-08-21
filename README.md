@@ -22,9 +22,12 @@ Hold Trigger 2 (🅉 or 🄲) to trim the controls, Trigger 1 and Trigger 2 to r
 
 ## HINTS
 
-The controls are pretty hard to master. I won't judge you for quicksaving (WASM4 menu: ⏎).
+The controls are pretty hard to master; very small movements often suffice.
+
+For the first mission, you only need to reach the runway; after that, you will have to land gracefully.
 
 Shake off missiles by flying very close to the ground until they crash.
+
 
 Good luck, pilot.
 

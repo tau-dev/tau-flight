@@ -16,7 +16,7 @@ const knots = 1.943844 * 2.0; // knots / (m/s)
 const craft_height = 0.01;
 const rot_null = vers{1, 0, 0, 0};
 const rot_half = vers{0, 0, 1, 0};
-const rot_quart = norm(vers{1, 0, 1, 0});
+const rot_quart = versnorm(vers{1, 0, 1, 0});
 const screen_w = 160;
 const screen_h = 120;
 const fov_fac = 1.0;
@@ -28,13 +28,14 @@ var max_depth: f32 = relative_max_depth;
 
 const runway_width = 0.5;
 const runway_length = 3;
+var rng = std.rand.DefaultPrng.init(2022);
 
 const runways = blk: {
     @setEvalBranchQuota(10000);
     break :blk [_]v3{
         grid(-9, -9) + v3{0, 0.4, 0},
-        grid(-7, -26
-        ) + v3{0, 0.4, 0},
+        grid(-8, -26) + v3{0, 0.5, 0},
+        grid(20, -9) + v3{0, 0.15, 0},
     };
 };
 
@@ -137,7 +138,7 @@ var missions = [_]Mission{
     .{
         .name = "Take off and reach\n the next runway",
         .state = .running,
-        .start_pos = .{-9, -1, -6},
+        .start_pos = .{-9, -1.1, -6.2},
         .start_speed = .{0,0,-0.0001},
         .start_dir = rot_null,
     },
@@ -151,16 +152,17 @@ var missions = [_]Mission{
     .{
         .name = "Escape the missile\n and land",
         .state = .running,
-        .start_pos = .{-9, 2, -9},
-        .start_speed = .{0,0,0},
-        .start_dir = rot_null,
+        .start_pos = .{3, 2, 3},
+        .start_speed = .{-0.8, 0,-0.8},
+        .start_dir = from_axis(.{0,1,0},45),
+        .missile = true,
     },
     .{
-        .name = "Fly north and stay\n below the radar",
+        .name = "Land at the runway\n in the west, stay\n below the enemy's\n radar (700ft HGT)",
         .state = .running,
-        .start_pos = .{-9, 2, -9},
-        .start_speed = .{0,0,0},
-        .start_dir = rot_null,
+        .start_pos = .{-9, -1.1, -11},
+        .start_speed = .{0,0,0.0001},
+        .start_dir = rot_half,
     },
 };
 
@@ -168,6 +170,7 @@ export fn update() void {
     const gamepad = w4.GAMEPAD[0];
     const yoke = w4.GAMEPAD[1];
     frame += 1;
+    rng.seed(frame);
 
     if (gamestate == .begin) {
         w4.PALETTE.* = .{
@@ -313,7 +316,7 @@ export fn update() void {
 
 
     const drag_min = 0.02;
-    const thrust = 0.035;
+    const thrust = 0.04;
     const gravity = -0.1;
     _ = gravity;
 
@@ -358,7 +361,7 @@ export fn update() void {
 
     const altitude = cam_pos[1];
     const groundheight = altitude - gridheight(cam_pos[0], cam_pos[2]);
-    const max_impact = 0.06; // 15m/s
+    const max_impact = 0.04; // 15m/s
     ground_normal = v3{
         -(gridheight(cam_pos[0]+0.05, cam_pos[1]) - gridheight(cam_pos[0]-0.05, cam_pos[1])),
         1,
@@ -402,7 +405,7 @@ export fn update() void {
 
     const missile_speed = 2.0;
     const missile_forward = rot(.{0,0,1}, missile.heading);
-    const missile_turnspeed = 0.04;
+    const missile_turnspeed = 0.03;
     const missile_delta = cam_pos - missile.pos;
     if (missile_active) {
         missile.heading = mult(from_omega(scale(-cross(norm(missile_delta), missile_forward), missile_turnspeed)), missile.heading);
@@ -462,8 +465,8 @@ export fn update() void {
     for (runways) |r| {
         paintRunway(r);
     }
-    cube(.{-1.5, gridheight(-1.5,-1)-1, -1}, 1.5, 0.5, 0.5, 3);
-    cube(.{0.5, gridheight(0.5,-2)-1, -2}, 2, 0.2, 0.2, 3);
+    cube(runways[1]+v3{1,-1,0}, 1.5, 0.5, 0.5, 2, 3);
+    cube(runways[0]+v3{1,-1,0}, 2, 0.2, 0.2, 2, 3);
 
 
     w4.DRAW_COLORS.fill = 4;
@@ -471,12 +474,13 @@ export fn update() void {
 //     tooltip(v3{-0.5, 2, -9.5}, 1337);
 //     tooltip(v3{-1.25, 0.9, -0.75}, &TEE);
 
-    const missile_r = 0.03;
-    missile.paint(.{0,0,0.2}, .{missile_r,0,0}, .{-missile_r,0,0}, 3);
-    missile.paint(.{0,0,0.2}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
-    missile.paint(.{missile_r,0,0}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
-    missile.paint(.{-missile_r,0,0}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
-
+    if (missile_active) {
+        const missile_r = 0.03;
+        missile.paint(.{0,0,0.2}, .{missile_r,0,0}, .{-missile_r,0,0}, 3);
+        missile.paint(.{0,0,0.2}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
+        missile.paint(.{missile_r,0,0}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
+        missile.paint(.{-missile_r,0,0}, .{0,missile_r,0}, .{0,-missile_r,0}, 3);
+    }
 
 
 
@@ -629,27 +633,6 @@ export fn update() void {
         }
     }
 
-
-    // WARNINGS
-    if (!landed) {
-        if (altwarn)
-            newline("ALTITUDE", &y);
-        if (stalling)
-            newline("STALL", &y);
-    } else if (braking) {
-        w4.DRAW_COLORS.fill = 2;
-        newline("BRAKING", &y);
-    }
-
-
-    w4.DRAW_COLORS.fill = 0;
-    w4.DRAW_COLORS.outline = 1;
-    w4.rect(0,0, 160, screen_h);
-//     w4.PALETTE[3] += 0x070503;
-    w4.DRAW_COLORS.fill = 1;
-    w4.DRAW_COLORS.outline = 3;
-
-
     if (gamestate == .running) {
         switch (selected_mission) {
             0 => {
@@ -662,18 +645,53 @@ export fn update() void {
                 }
             },
             2 => {
-                if (len(ground_speed) < 0.01 and onRunway(cam_pos[0], cam_pos[2], runways[0]) and @fabs(cam_pos[1] - runways[0][1]) < 0.1) {
+                for (runways) |runway| {
+                    if (len(ground_speed) < 0.01 and onRunway(cam_pos[0], cam_pos[2], runway) and @fabs(cam_pos[1] - runway[1]) < 0.1) {
+                        gamestate = .success;
+                    }
+                    break;
+                }
+            },
+            3 => {
+                if (groundheight > 0.7) {
+                    newline("DETECTED", &y);
+                    if (!missile_active) {
+                        missile_active = true;
+                        const direction  = v2{rng.random().floatNorm(f32) - 0.5, rng.random().floatNorm(f32) - 0.5};
+                        const missile_spawn = scale2(direction, 20/len(direction));
+                        const p = grid(cam_pos[0] + missile_spawn[0], cam_pos[2] + missile_spawn[1]) + v3{0, 2, 0};
+                        missile = Entity{
+                            .pos = p,
+                            .heading = comptime from_axis(.{0, 1, 0}, 90)
+                        };
+                    }
+                }
+                if (len(ground_speed) < 0.01 and onRunway(cam_pos[0], cam_pos[2], runways[2]) and @fabs(cam_pos[1] - runways[2][1]) < 0.1) {
                     gamestate = .success;
                 }
             },
-            else => {},
+            else => unreachable,
         }
     }
 
+    if (!landed) {
+        if (altwarn)
+            newline("ALTITUDE", &y);
+        if (stalling)
+            newline("STALL", &y);
+    } else if (braking) {
+        w4.DRAW_COLORS.fill = 2;
+        newline("BRAKING", &y);
+    }
 
+    w4.DRAW_COLORS.fill = 0;
+    w4.DRAW_COLORS.outline = 1;
+    w4.rect(0,0, 160, screen_h);
 
     // =========== DEBUG ============
 
+    w4.DRAW_COLORS.fill = 1;
+    w4.DRAW_COLORS.outline = 3;
 //     const c = rot(.{0,0,-1}, cam_rot);
     const print_vals = [_]f32{
         cam_pos[0],
@@ -682,7 +700,7 @@ export fn update() void {
     };
 
 
-    if (true) {
+    if (false) {
         for (print_vals) |v, i| {
             const print_y = 2 + 8 * @intCast(i32, i) + 1;
             w4.DRAW_COLORS.outline = 0;
@@ -850,10 +868,7 @@ fn print(comptime fmt: []const u8, args: anytype) void {
     w4.text(msg, 2, 12);
 }
 
-fn cube(p: v3, h: f32, w: f32, d: f32, col: u8) void {
-    _ = col;
-    const c1 = 2;
-    const c2 = 3;
+fn cube(p: v3, h: f32, w: f32, d: f32, c1: u8, c2: u8) void {
     if (all(cam_pos > p) and all(cam_pos < p + v3{w, h, d})) {
         fatality = .crash;
     }
@@ -877,12 +892,13 @@ fn paintRunway(origin: v3) void {
     const width = runway_width;
     const length = runway_length;
 
-    quad(.{
-        origin + v3{width, 0, length},
-        origin + v3{width, 0, -length},
-        origin + v3{-width, 0, length},
-        origin + v3{-width, 0, -length},
-    }, 3, 3);
+    cube(origin - v3{width, 2, length}, 2, width * 2.0, length * 2.0, 3, 3);
+//     quad(.{
+//         origin + v3{width, 0, length},
+//         origin + v3{width, 0, -length},
+//         origin + v3{-width, 0, length},
+//         origin + v3{-width, 0, -length},
+//     }, 3, 3);
 
     const stripe_width = 0.02;
     const stripe_length = 0.08;
@@ -1141,7 +1157,7 @@ fn terrainHeight(x: f32, y: f32) f32 {
 //     const bim = biome(x, y);
     const u = x + 105;
     const v = y + 160;
-    return perlin(.{u, v}, 10) * 5 -@fabs(perlin(.{u, v + 100}, 5) * 5) + perlin(.{u, v + 500}, 3) * 3;
+    return perlin(.{u, v}, 10) * 6 -@fabs(perlin(.{u, v + 100}, 5) * 5) + perlin(.{u, v + 500}, 3) * 3;
 }
 
 fn perlin(v: v2, sc: f32) f32 {
@@ -1177,7 +1193,7 @@ fn hash(x: i32, y: i32) f32 {
     const a = [2]i32{x,y};
     const d = @truncate(u16, std.hash.Wyhash.hash(1337, &@bitCast([8]u8, a)));
     const c = (@intToFloat(f32, d) / 65536 - 0.5) * 2;
-    return c * c * c;
+    return math.copysign(f32, c * c, c);
 }
 
 
