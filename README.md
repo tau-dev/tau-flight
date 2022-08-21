@@ -6,7 +6,7 @@ The aerodynamic model is physically-based, but the plane
 parameters do not correspond to any particular real-world plane.
 
 The renderer is very CPU-intensive; you will probably want to run this
-game on a desktop PC in Firefox or Chromium.
+game on a decent desktop PC with Firefox or Chromium.
 
 ## CONTROLS
 
@@ -20,4 +20,12 @@ Trigger 1 (🅇) to toggle the altimeter between ground (HGT) and sea level (ALT
 
 Hold Trigger 2 (🅉 or 🄲) to trim the controls, Trigger 1 and Trigger 2 to reset the trim.
 
-Good luck, pilot!
+## HINTS
+
+The controls are pretty hard to master. I won't judge you for quicksaving (WASM4 menu: ⏎).
+
+Shake off missiles by flying very close to the ground until they crash.
+
+Good luck, pilot.
+
+

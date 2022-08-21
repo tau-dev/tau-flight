@@ -1,11 +1,5 @@
-> TODO
-Auswahlbildschirm Missionen
-Künstlicher Horizont
-
-
-
-> Ideen
 Nachbrenner?
+
 
 Herausforderungen:
 Parabelflug (g-Meter?)
@@ -14,7 +8,9 @@ Maximale Bodenhöhe
 => sonst: Raketen?
     Radar!
 
+
 Flugzeugträger
+
 
 Treffer => Instrumente zerstört
     => Landung zur Reparatur

@@ -1,6 +1,8 @@
 /zig-cache
 /zig-out
 *.htm
+*.html
 *.wasm
+*.png
 
 wapm_packages

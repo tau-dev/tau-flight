@@ -28,7 +28,15 @@ var max_depth: f32 = relative_max_depth;
 
 const runway_width = 0.5;
 const runway_length = 3;
-const runway1 = grid(-9, -9) + v3{0, 0.4, 0};
+
+const runways = blk: {
+    @setEvalBranchQuota(10000);
+    break :blk [_]v3{
+        grid(-9, -9) + v3{0, 0.4, 0},
+        grid(-7, -26
+        ) + v3{0, 0.4, 0},
+    };
+};
 
 const Biome = packed struct {
     const Bytes = [@sizeOf(Biome)]u8;
@@ -56,24 +64,12 @@ const Biome = packed struct {
 };
 
 const biomes = [_]Biome{
-//     .{
-//         .sky = 0x7cb9cb, // blueish white
-//         .ground1 = 0x5e7b60, // light green
-//         .ground2 = 0x50605b, // dark green
-//         .height_scale = 102,
-//     },
     .{
-        .sky = 0x0cb9cb, // blueish white
+        .sky = 0x0dc9db, // blueish white
         .ground1 = 0x208010, // light green
         .ground2 = 0x104808, // dark green
         .height_scale = 102,
     },
-//     .{
-//         .sky = 0x6c90ff, // blue
-//         .ground1 = 0xebdea9, // light green
-//         .ground2 = 0xcec292, // yellowish gray
-//         .height_scale = 10,
-//     },
 };
 
 export fn start() void {
@@ -102,8 +98,11 @@ var prev_gamepad: w4.Input = std.mem.zeroInit(w4.Input, .{});
 var depth: [screen_w][screen_h]Depth = undefined;
 const State = enum {
     begin,
-    run_with_missiles,
+    running,
+    success,
+    continued,
 };
+
 var gamestate = State.begin;
 
 var fatality: enum {
@@ -125,7 +124,45 @@ var missile_active = true;
 var missile: Entity = undefined;
 var selected_mission: u8 = 0;
 
-
+const Mission = struct {
+    name: []const u8,
+    state: State,
+    start_pos: v3,
+    start_speed: v3,
+    start_dir: vers,
+    missile: bool = false,
+    complete: bool = false,
+};
+var missions = [_]Mission{
+    .{
+        .name = "Take off and reach\n the next runway",
+        .state = .running,
+        .start_pos = .{-9, -1, -6},
+        .start_speed = .{0,0,-0.0001},
+        .start_dir = rot_null,
+    },
+    .{
+        .name = "Land at the runway\n to the northwest",
+        .state = .running,
+        .start_pos = .{-11, 0, -20},
+        .start_speed = .{0,0,0.7},
+        .start_dir = rot_half,
+    },
+    .{
+        .name = "Escape the missile\n and land",
+        .state = .running,
+        .start_pos = .{-9, 2, -9},
+        .start_speed = .{0,0,0},
+        .start_dir = rot_null,
+    },
+    .{
+        .name = "Fly north and stay\n below the radar",
+        .state = .running,
+        .start_pos = .{-9, 2, -9},
+        .start_speed = .{0,0,0},
+        .start_dir = rot_null,
+    },
+};
 
 export fn update() void {
     const gamepad = w4.GAMEPAD[0];
@@ -137,16 +174,11 @@ export fn update() void {
             0x000000,
             0xffffff,
             0x20cc20,
-            0x552200, // brown
+            0x5555ff, // brown
         };
         w4.DRAW_COLORS.outline = 0;
         w4.DRAW_COLORS.fill = 3;
-        const Mission = struct { name: []const u8, state: State };
         std.mem.set(u8, w4.FRAMEBUFFER[0..], 0);
-        const missions = [_]Mission{
-            .{ .name = "Escape the missile", .state = .run_with_missiles },
-            .{ .name = "Escape the missile", .state = .run_with_missiles },
-        };
         if (gamepad.down and !prev_gamepad.down and selected_mission + 1 < missions.len)
             selected_mission += 1;
         if (gamepad.up and !prev_gamepad.up and selected_mission > 0)
@@ -154,11 +186,12 @@ export fn update() void {
 
         const start_height = 20;
         for (missions) |m, i| {
+            if (m.complete) w4.DRAW_COLORS.fill = 4 else w4.DRAW_COLORS.fill = 3;
             if (i == selected_mission) {
                 const marker = if (frame % 40 < 20) "-" else ">";
-                w4.text(marker, 2, @intCast(i32, 10 * i + start_height));
+                w4.text(marker, 2, @intCast(i32, 24 * i + start_height));
             }
-            w4.text(m.name, 10, @intCast(i32, 10 * i + start_height));
+            w4.text(m.name, 10, @intCast(i32, 24 * i + start_height));
         }
 
 
@@ -170,6 +203,26 @@ export fn update() void {
             startGame();
         }
         prev_gamepad = gamepad;
+        return;
+    } else if (gamestate == .success) {
+        missions[selected_mission].complete = true;
+        w4.PALETTE.* = .{
+            0xffffff,
+            0x000000,
+            0x20cc20,
+            0x552200,
+        };
+        std.mem.set(u8, w4.FRAMEBUFFER[0..], 0);
+        w4.DRAW_COLORS.outline = 1;
+        w4.DRAW_COLORS.fill = 2;
+        w4.text("MISSION SUCCESS\n===============", 16, 20);
+//         w4.DRAW_COLORS.fill = 3;
+        w4.text("[C] Menu\n\n[X] Continue", 24, 100);
+
+        if (gamepad.button1)
+            gamestate = .continued
+        else if (gamepad.button2)
+            gamestate = .begin;
         return;
     } else if (fatality != .alive) {
         std.mem.set(u8, w4.FRAMEBUFFER[0..], 255);
@@ -184,7 +237,7 @@ export fn update() void {
         w4.DRAW_COLORS.fill = 1;
 //         w4.text("\n\n\n\n\n\n\n\n     R. I. P.\n\n\n\n\n\n\n\n  [R] to restart.", 8, 8);
 //         w4.text(" Restart\n\n In\n\n Peace.\n\n\n\n\n\n\n   [X]", 45, 60);
-        w4.text(" Restart\n\n In\n\n Peace.\n\n\n\n  [X]", 45, 60);
+        w4.text(" Restart\n\n In\n\n Peace.\n\n\n\n   [X]", 45, 60);
         w4.DRAW_COLORS.fill = 2;
         w4.text("[C] Menu", 92, 150);
         if (gamepad.button1)
@@ -267,7 +320,7 @@ export fn update() void {
     var stalling: bool = false;
     const control_area = 0.6;
     const steer_angle = 0.5;
-    const base_aoa: f32 = if (landed) 0 else 0.02;
+    const base_aoa: f32 = if (landed) 0.01 else 0.02;
     const wing_drag: f32 = if (braking) 0.5 else 0.05;
     const control_drag = 0.05;
 
@@ -275,7 +328,7 @@ export fn update() void {
     const wing_main_left = wingForce(.{0.1, 1, base_aoa},  .{-5,0,0}, 3.5, control_drag, &stalling);
     const aileron_right = wingForce(.{0, 1, base_aoa + steer[2] * steer_angle}, .{4,0,0}, control_area, control_drag, &stalling);
     const aileron_left = wingForce(.{0, 1, base_aoa + -steer[2] * steer_angle}, .{-4,0,0}, control_area, control_drag, &stalling);
-    const tail_vertical = wingForce(.{1, 0, 0}, .{0,0,10}, 2, control_drag, &stalling);
+    const tail_vertical = wingForce(.{1, 0, 0}, .{0,0,10}, 1, control_drag, &stalling);
     const rudder = wingForce(.{1, 0, steer[0] * steer_angle}, .{0,0,10}, control_area, control_drag, &stalling);
     const tail_horizontal = wingForce(.{0, 1, 0.7*base_aoa}, .{0,0,10}, control_area, control_drag, &stalling);
     const elevator = wingForce(.{0, 1, 1.5*base_aoa - steer[1] * steer_angle}, .{0,0,10}, control_area, control_drag, &stalling);
@@ -295,11 +348,17 @@ export fn update() void {
                 + elevator.trq + aileron_left.trq + aileron_right.trq + rudder.trq;
     angular_momentum += scale(torque, 1.0/60.0);
 
+    const turn_torque = 0.01;
+    if (landed and gamepad.left)
+        angular_momentum += scale(.{0,  turn_torque, 0}, (0.1+len(ground_speed))/60.0);
+    if (landed and gamepad.right)
+        angular_momentum += scale(.{0, -turn_torque, 0}, (0.1+len(ground_speed))/60.0);
+
 
 
     const altitude = cam_pos[1];
     const groundheight = altitude - gridheight(cam_pos[0], cam_pos[2]);
-    const max_impact = 0.05; // 12m/s
+    const max_impact = 0.06; // 15m/s
     ground_normal = v3{
         -(gridheight(cam_pos[0]+0.05, cam_pos[1]) - gridheight(cam_pos[0]-0.05, cam_pos[1])),
         1,
@@ -311,19 +370,20 @@ export fn update() void {
 
     landed = groundheight <= craft_height;
 
-
     if (landed) {
         if (@fabs(impact_speed) > max_impact) {
             fatality = .crash;
         } else {
-            ground_speed -= scale(ground_normal, impact_speed);
+            if (impact_speed < 0)
+                ground_speed -= scale(ground_normal, impact_speed);
             // 9m/s² brakes, oh well
             if (braking)
                 ground_speed -= scale(ground_speed, 0.03/len(ground_speed)/60.0);
         }
 
-        cam_pos[1] = gridheight(cam_pos[0], cam_pos[2]) + craft_height;
-        angular_momentum = scale(angular_momentum, 0.95) + scale(cross(rot(.{0,1,0}, mult(cam_rot, from_axis(.{1,0,0}, 1))), .{0,1,0}), 0.0002);
+        cam_pos[1] = gridheight(cam_pos[0], cam_pos[2]) + craft_height - 0.0002;
+        const adjustment = cross(rot(.{0,1,0}, mult(cam_rot, from_axis(.{1,0,0}, 1))), .{0,1,0});
+        angular_momentum = scale(angular_momentum, 0.95) + scale(adjustment, 0.00002/math.clamp(len(adjustment)*2, 0.05, 2));
     }
 
     const omega = angularSpeed();
@@ -399,7 +459,9 @@ export fn update() void {
         }
     }
     w4.DRAW_COLORS.fill = 1;
-    paintRunway(runway1);
+    for (runways) |r| {
+        paintRunway(r);
+    }
     cube(.{-1.5, gridheight(-1.5,-1)-1, -1}, 1.5, 0.5, 0.5, 3);
     cube(.{0.5, gridheight(0.5,-2)-1, -2}, 2, 0.2, 0.2, 3);
 
@@ -467,7 +529,7 @@ export fn update() void {
     _ = heading;
     const heading_display_y = screen_h+6;
     w4.blit(&head_text, 9, heading_display_y, 16,4, w4.BLIT_1BPP);
-    num(19, heading_display_y+6, @floatToInt(u32, @mod(heading / math.pi * 180 + 180, 360)));
+    num(19, heading_display_y+6, @floatToInt(u32, @mod(180 - heading / math.pi * 180, 360)));
     w4.blit(&degrees_text, 24, heading_display_y+6, 3,3, w4.BLIT_1BPP);
 
     w4.blit(&speed_text, 38, heading_display_y, 16,4, w4.BLIT_1BPP);
@@ -492,10 +554,13 @@ export fn update() void {
     w4.DRAW_COLORS.fill = 3;
     w4.DRAW_COLORS.outline = 2;
     circle(radar_x, radar_y, radar_radius);
+    circle(radar_x, radar_y, radar_radius / 2);
     w4.pixel(radar_x, radar_y, 1);
-    radar(.{runway1[0], runway1[2]}, heading, 3);
-    radar(.{runway1[0], runway1[2]+1}, heading, 3);
-    radar(.{runway1[0], runway1[2]-1}, heading, 3);
+    for (runways) |run| {
+        radar(.{run[0], run[2]}, heading, 3);
+        radar(.{run[0], run[2]+1}, heading, 3);
+        radar(.{run[0], run[2]-1}, heading, 3);
+    }
     if (missile_active)
         radar(.{missile.pos[0], missile.pos[2]}, heading, @as(u8, @boolToInt(frame % 4 < 2)) * 3);
 
@@ -585,7 +650,25 @@ export fn update() void {
     w4.DRAW_COLORS.outline = 3;
 
 
-
+    if (gamestate == .running) {
+        switch (selected_mission) {
+            0 => {
+                if (onRunway(cam_pos[0], cam_pos[2], runways[1]))
+                    gamestate = .success;
+            },
+            1 => {
+                if (len(ground_speed) < 0.01 and onRunway(cam_pos[0], cam_pos[2], runways[0]) and @fabs(cam_pos[1] - runways[0][1]) < 0.1) {
+                    gamestate = .success;
+                }
+            },
+            2 => {
+                if (len(ground_speed) < 0.01 and onRunway(cam_pos[0], cam_pos[2], runways[0]) and @fabs(cam_pos[1] - runways[0][1]) < 0.1) {
+                    gamestate = .success;
+                }
+            },
+            else => {},
+        }
+    }
 
 
 
@@ -599,29 +682,32 @@ export fn update() void {
     };
 
 
-    for (print_vals) |v, i| {
-        const print_y = 2 + 8 * @intCast(i32, i) + 1;
-        w4.DRAW_COLORS.outline = 0;
-        w4.rect(2, print_y-1, 34, 8);
-        w4.DRAW_COLORS.outline = 3;
-        num(30, print_y, @floatToInt(u32, @fabs(v * 100)));
-        w4.pixel(24, @intCast(u32, print_y + 5), 2);
-        w4.pixel(24, @intCast(u32, print_y + 6), 2);
-        if (v < 0) {
-            w4.blit(&numbers[10], 2, print_y, 4, 6, w4.BLIT_1BPP);
+    if (true) {
+        for (print_vals) |v, i| {
+            const print_y = 2 + 8 * @intCast(i32, i) + 1;
+            w4.DRAW_COLORS.outline = 0;
+            w4.rect(2, print_y-1, 34, 8);
+            w4.DRAW_COLORS.outline = 3;
+            num(30, print_y, @floatToInt(u32, @fabs(v * 100)));
+            w4.pixel(24, @intCast(u32, print_y + 5), 2);
+            w4.pixel(24, @intCast(u32, print_y + 6), 2);
+            if (v < 0) {
+                w4.blit(&numbers[10], 2, print_y, 4, 6, w4.BLIT_1BPP);
+            }
         }
     }
-
     prev_gamepad = gamepad;
 }
 
 const radar_x = 138;
 const radar_y = screen_h + 20;
 const radar_radius = 18;
+const radar_scale = 2.0;
+
 fn radar(point: v2, angle: f32, col: u8) void {
     const p = v2{
-        point[0] - cam_pos[0],
-        point[1] - cam_pos[2],
+        (point[0] - cam_pos[0]) * radar_scale,
+        (point[1] - cam_pos[2]) * radar_scale,
     };
     const x = @round( @cos(angle) * p[0] - @sin(angle) * p[1] );
     const y = @round( @sin(angle) * p[0] + @cos(angle) * p[1] );
@@ -688,13 +774,16 @@ fn artificialForce(angle: vers, pos: v3, plane_force: v3) struct { f: v3, trq: v
 
 
 fn startGame() void {
+    w4.PALETTE[3] = 0x552200;
     fatality = .alive;
-    cam_pos = cam_start;
-    cam_rot = cam_default;
-    ground_speed = comptime rot(v3{0,0,-1}, cam_default);
+    const m = missions[selected_mission];
+    cam_pos = m.start_pos;
+    cam_rot = m.start_dir;
+    ground_speed = m.start_speed;//comptime rot(v3{0,0,-1}, cam_default);
     angular_momentum = v3{0,0,0};
     missile = Entity{.pos = .{0,5,0}, .heading = comptime from_axis(.{0, 1, 0}, 90)};
-    throttle = 1;
+    missile_active = m.missile;
+    throttle = 0;
     steer = v3{0,0,0};
     trim = v3{0,0,0};
 }
@@ -1092,10 +1181,15 @@ fn hash(x: i32, y: i32) f32 {
 }
 
 
+fn onRunway(xs: f32, ys: f32, runway: v3) bool {
+    return @fabs(xs - runway[0]) < runway_width and @fabs(ys - runway[2]) < runway_length;
+}
 
 fn gridheight(xs: f32, ys: f32) f32 {
-    if (@fabs(xs - runway1[0]) < runway_width and @fabs(ys - runway1[2]) < runway_length)
-        return runway1[1];
+    for (runways) |r| {
+        if (onRunway(xs, ys, r))
+            return r[1];
+    }
 
     const x = @floor(xs);
     const y = @floor(ys);
