@@ -1,17 +1,17 @@
 [package]
-name = "tau-dev/taufs"
-version = "0.1.0"
+name = "tau-dev/taufl1"
+version = "1.0.1"
 description = "A flight simulator on WASM-4."
 license = "ISC"
 readme = "README.md"
 
 [[module]]
-name = "taufs"
-source = "zig-out/lib/taufs1.wasm"
+name = "taufl1"
+source = "zig-out/lib/taufl1.wasm"
 abi = "wasm4"
 interfaces = { wasm4 = "0.0.1" }
 
 [[command]]
 runner = "wasm4@0.0.1"
 name = "play"
-module = "taufs"
+module = "taufl1"

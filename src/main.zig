@@ -220,7 +220,7 @@ export fn update() void {
         w4.DRAW_COLORS.fill = 2;
         w4.text("MISSION SUCCESS\n===============", 16, 20);
 //         w4.DRAW_COLORS.fill = 3;
-        w4.text("[C] Menu\n\n[X] Continue", 24, 100);
+        w4.text("[C] Menu\n\n[X] Continue in\n this mission", 20, 100);
 
         if (gamepad.button1)
             gamestate = .continued
@@ -466,8 +466,15 @@ export fn update() void {
         paintRunway(r);
     }
     cube(runways[1]+v3{1,-1,0}, 1.5, 0.5, 0.5, 2, 3);
+    cube(runways[1]+v3{1,-1,3}, 1.0, 1.0, 1.2, 2, 3);
+    cube(runways[1]+v3{-2,-1,-2}, 0.5, 7.0, 7.2, 2, 2);
     cube(runways[0]+v3{1,-1,0}, 2, 0.2, 0.2, 2, 3);
 
+
+    cube(grid(7,-12.5), 0.04, 0.04, 0.3, 3, 3);
+    cube(grid(7,-12.5), 0.3, 0.04, 0.04, 3, 3);
+    cube(grid(7,-12.5) + v3{0, 0.3, 0}, 0.04, 0.04, 0.3, 3, 3);
+    cube(grid(7,-12.5) + v3{0, 0, 0.3}, 0.3, 0.04, 0.04, 3, 3);
 
     w4.DRAW_COLORS.fill = 4;
     w4.DRAW_COLORS.outline = 1;
@@ -562,7 +569,9 @@ export fn update() void {
     w4.pixel(radar_x, radar_y, 1);
     for (runways) |run| {
         radar(.{run[0], run[2]}, heading, 3);
+        radar(.{run[0], run[2]+0.5}, heading, 3);
         radar(.{run[0], run[2]+1}, heading, 3);
+        radar(.{run[0], run[2]-0.5}, heading, 3);
         radar(.{run[0], run[2]-1}, heading, 3);
     }
     if (missile_active)
@@ -716,6 +725,12 @@ export fn update() void {
     }
     prev_gamepad = gamepad;
 }
+
+
+// As a Vietnamese, this is the first time in my life I hear about
+// Soviet computer. All we have back in the day are Soviet made cars,
+// and Aluminum wash-tub. The wash-tub is indestructible and the car was
+// unbearable.
 
 const radar_x = 138;
 const radar_y = screen_h + 20;
@@ -1058,7 +1073,7 @@ fn put(x: u32, y: u32, dpth: f32, col: u8) void {
     const d = @floatToInt(Depth, @sqrt(dr)*depth_scale);
     const dither = dither2;
     const dithersize = dither[0..].len;
-    const ditheroff = 3;
+    const ditheroff = 4;
 
     if (depth[x][y] >= d) {
         const dith = dither[x%dithersize][y%dithersize];
@@ -1133,23 +1148,17 @@ fn grid(x: f32, y: f32) v3 {
 }
 
 
-const biome_size = 20;
+// const biome_size = 20;
 fn biomeCorner(x: i32, y: i32) Biome {
-    return biomes[@intCast(u32, @mod(x+y, biomes.len))];
+    _ = x;
+    _ = y;
+    return biomes[0];
 }
 
 fn biome(x: f32, y: f32) Biome {
-    const u = x / biome_size;
-    const v = y / biome_size;
-    const ui = @floatToInt(i32, @floor(u));
-    const vi = @floatToInt(i32, @floor(v));
-
-    return Biome.interpolate(.{
-        biomeCorner(ui, vi),
-        biomeCorner(ui+1, vi),
-        biomeCorner(ui, vi+1),
-        biomeCorner(ui+1, vi+1),
-    }, @floatToInt(u8, @mod(u, 1) * 255), @floatToInt(u8, @mod(v, 1) * 255));
+    _ = x;
+    _ = y;
+    return biomes[0];
 }
 
 
