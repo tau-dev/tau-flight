@@ -53,15 +53,15 @@ comptime {
     assert(@sizeOf(DrawColors) == 2);
 }
 
-pub const PALETTE = @intToPtr(*[4]u32, 0x04);
-pub const DRAW_COLORS = @intToPtr(*DrawColors, 0x14);
-pub const GAMEPAD = @intToPtr(*[4]Input, 0x16);
-pub const MOUSE_X = @intToPtr(*const i16, 0x1a);
-pub const MOUSE_Y  = @intToPtr(*const i16, 0x1c);
-pub const MOUSE_BUTTONS = @intToPtr(*Mouse, 0x1e);
-pub const SYSTEM_FLAGS = @intToPtr(*System, 0x1f);
-pub const NETPLAY = @intToPtr(*const u8, 0x20);
-pub const FRAMEBUFFER = @intToPtr(*[6400]u8, 0xA0);
+pub const PALETTE = @ptrFromInt(*[4]u32, 0x04);
+pub const DRAW_COLORS = @ptrFromInt(*DrawColors, 0x14);
+pub const GAMEPAD = @ptrFromInt(*[4]Input, 0x16);
+pub const MOUSE_X = @ptrFromInt(*const i16, 0x1a);
+pub const MOUSE_Y  = @ptrFromInt(*const i16, 0x1c);
+pub const MOUSE_BUTTONS = @ptrFromInt(*Mouse, 0x1e);
+pub const SYSTEM_FLAGS = @ptrFromInt(*System, 0x1f);
+pub const NETPLAY = @ptrFromInt(*const u8, 0x20);
+pub const FRAMEBUFFER = @ptrFromInt(*[6400]u8, 0xA0);
 
 pub fn pixel(x: u32, y: u32, col: u8) void {
     const idx = y * 160 + x >> 2;

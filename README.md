@@ -1,3 +1,5 @@
+*This is the source code of [my WASM4 jam entry](https://tau-dev.itch.io/taufl1) from some time ago. It's a neat little software renderer, but the code is very unoptimized and has lots of game-jam sloppiness.*
+
 # Tᴀᴜ Flight Simulator 1.0
 
 A flight sim game for the [WASM-4](https://wasm4.org) fantasy console.

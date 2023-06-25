@@ -45,23 +45,6 @@ const Biome = packed struct {
     ground1: u32,
     ground2: u32,
     height_scale: u8,
-
-    fn interpolate(corners: [4]Biome, u: u8, v: u8) Biome {
-        const bytes = .{
-            @bitCast(Bytes, corners[0]),
-            @bitCast(Bytes, corners[1]),
-            @bitCast(Bytes, corners[2]),
-            @bitCast(Bytes, corners[3]),
-        };
-
-        var res: Bytes = undefined;
-        for (res) |*r, i| {
-            const upper =  @as(u32, bytes[1][i]) * u + @as(u32, bytes[0][i]) * (255 - @as(u32, u));
-            const lower =  @as(u32, bytes[3][i]) * u + @as(u32, bytes[2][i]) * (255 - @as(u32, u));
-            r.* = @intCast(u8, (lower * @as(u32, v) + upper * (255 - @as(u32, v))) / (255 * 255));
-        }
-        return @bitCast(Biome, res);
-    }
 };
 
 const biomes = [_]Biome{
@@ -181,14 +164,14 @@ export fn update() void {
         };
         w4.DRAW_COLORS.outline = 0;
         w4.DRAW_COLORS.fill = 3;
-        std.mem.set(u8, w4.FRAMEBUFFER[0..], 0);
+        @memset(w4.FRAMEBUFFER[0..], 0);
         if (gamepad.down and !prev_gamepad.down and selected_mission + 1 < missions.len)
             selected_mission += 1;
         if (gamepad.up and !prev_gamepad.up and selected_mission > 0)
             selected_mission -= 1;
 
         const start_height = 20;
-        for (missions) |m, i| {
+        for (missions, 0..) |m, i| {
             if (m.complete) w4.DRAW_COLORS.fill = 4 else w4.DRAW_COLORS.fill = 3;
             if (i == selected_mission) {
                 const marker = if (frame % 40 < 20) "-" else ">";
@@ -215,7 +198,7 @@ export fn update() void {
             0x20cc20,
             0x552200,
         };
-        std.mem.set(u8, w4.FRAMEBUFFER[0..], 0);
+        @memset(w4.FRAMEBUFFER[0..], 0);
         w4.DRAW_COLORS.outline = 1;
         w4.DRAW_COLORS.fill = 2;
         w4.text("MISSION SUCCESS\n===============", 16, 20);
@@ -228,7 +211,7 @@ export fn update() void {
             gamestate = .begin;
         return;
     } else if (fatality != .alive) {
-        std.mem.set(u8, w4.FRAMEBUFFER[0..], 255);
+        @memset(w4.FRAMEBUFFER[0..], 255);
         w4.DRAW_COLORS.fill = 2;
         w4.DRAW_COLORS.outline = 0;
         const cause = switch (fatality) {
@@ -312,13 +295,12 @@ export fn update() void {
     }
     const braking = throttle == 0 and gamepad.down;
 
-    steer = @maximum(v3{-1,-1,-1}, @minimum(v3{1,1,1}, steer));
+    steer = @max(v3{-1,-1,-1}, @min(v3{1,1,1}, steer));
 
 
     const drag_min = 0.02;
     const thrust = 0.04;
     const gravity = -0.1;
-    _ = gravity;
 
     var stalling: bool = false;
     const control_area = 0.6;
@@ -341,10 +323,10 @@ export fn update() void {
         + elevator.f + aileron_left.f + aileron_right.f + rudder.f
         + v3{0, gravity, 0}
         + rot(.{0, 0, -thrust*throttle}, cam_rot)
-        + scale(ground_speed, -@minimum(30, drag_min) * len(ground_speed))
+        + scale(ground_speed, -@min(30, drag_min) * len(ground_speed))
     ;
-    _ = acc;
-    ground_speed += scale(acc, 1/60.0);
+
+    ground_speed += scale(acc, 1.0/60.0);
     cam_pos += scale(ground_speed, 1.0/60.0 * 2.0/3.0);
 
     const torque = wing_main_right.trq + wing_main_left.trq + tail_vertical.trq + tail_horizontal.trq
@@ -398,8 +380,8 @@ export fn update() void {
     w4.PALETTE[1] = current_biome.ground1;
     w4.PALETTE[2] = current_biome.ground2;
 
-    std.mem.set(u8, w4.FRAMEBUFFER[0..screen_w*screen_h/4], 0);
-    std.mem.set(Depth, @ptrCast(*[screen_w*screen_h]Depth, &depth), math.maxInt(Depth));
+    @memset(w4.FRAMEBUFFER[0..screen_w*screen_h/4], 0);
+    @memset(@ptrCast(*[screen_w*screen_h]Depth, &depth), math.maxInt(Depth));
 
 
 
@@ -442,9 +424,9 @@ export fn update() void {
                     grid(u, v+groundscale),
                     grid(u+groundscale, v+groundscale),
                 };
-                const col = @as(u8, @boolToInt(@mod(u+v, 2) < 1));
+                const col = @as(u8, @intFromBool(@mod(u+v, 2) < 1));
                 quad(c, 1+col, 1+col); // Tris
-//                 const col = @floatToInt(u8, @mod(u + v, 2)) + 1;
+//                 const col = @intFromFloat(u8, @mod(u + v, 2)) + 1;
 //                 quad(c, col, col); // Squares
 //                 quad(c, col, 3 - col); // Stripes
 
@@ -493,7 +475,7 @@ export fn update() void {
 
     // ======================== INSTRUMENTS ========================
 
-    std.mem.set(u8, w4.FRAMEBUFFER[screen_w*screen_h/4..], 255);
+    @memset(w4.FRAMEBUFFER[screen_w*screen_h/4..], 255);
     w4.DRAW_COLORS.fill = 1;
 
     // THROTTLE
@@ -503,7 +485,7 @@ export fn update() void {
     w4.rect(throttle_x, screen_h + 6, 4, 28);
     w4.DRAW_COLORS.outline = 3;
     w4.DRAW_COLORS.fill = 1;
-    w4.rect(throttle_x-4, screen_h + 32 - @floatToInt(i32, throttle*28), 12, 4);
+    w4.rect(throttle_x-4, screen_h + 32 - @intFromFloat(i32, throttle*28), 12, 4);
 
 
     // YOKE
@@ -521,11 +503,11 @@ export fn update() void {
 
     w4.DRAW_COLORS.fill = 0;
     w4.DRAW_COLORS.outline = 1;
-    circle(72 + controls_size/2 + @floatToInt(i32, @round(controls_size * 0.9 * -curt(steer[2]) / 2)),
-        screen_h + 19 + @floatToInt(i32, @round(controls_size * 0.9  * curt(steer[1]) / 2)), 2);
+    circle(72 + controls_size/2 + @intFromFloat(i32, @round(controls_size * 0.9 * -curt(steer[2]) / 2)),
+        screen_h + 19 + @intFromFloat(i32, @round(controls_size * 0.9  * curt(steer[1]) / 2)), 2);
 
     w4.DRAW_COLORS.fill = 1;
-    w4.vline(72 + controls_size/2 + @floatToInt(i32, @round(controls_size * 0.9 * -steer[0] / 2)),
+    w4.vline(72 + controls_size/2 + @intFromFloat(i32, @round(controls_size * 0.9 * -steer[0] / 2)),
         screen_h + 20, 3);
 
 
@@ -537,26 +519,26 @@ export fn update() void {
     const r = v2{forward[0] / len2, forward[2] / len2};
     const heading = math.atan2(f32, r[0], r[1]);
     const pitch = 90 - math.acos(forward[1]) / math.pi * 180;
-    _ = heading;
+
     const heading_display_y = screen_h+6;
     w4.blit(&head_text, 9, heading_display_y, 16,4, w4.BLIT_1BPP);
-    num(19, heading_display_y+6, @floatToInt(u32, @mod(180 - heading / math.pi * 180, 360)));
+    num(19, heading_display_y+6, @intFromFloat(u32, @mod(180 - heading / math.pi * 180, 360)));
     w4.blit(&degrees_text, 24, heading_display_y+6, 3,3, w4.BLIT_1BPP);
 
     w4.blit(&speed_text, 38, heading_display_y, 16,4, w4.BLIT_1BPP);
-    num(50, heading_display_y+6, @floatToInt(u32, len(ground_speed) * 100 * knots));
+    num(50, heading_display_y+6, @intFromFloat(u32, len(ground_speed) * 100 * knots));
     w4.blit(&knots_text, 56, heading_display_y+8, 8,4, w4.BLIT_1BPP);
 
     const pitch_display_y = screen_h+21;
     w4.blit(&pitch_text, 8, pitch_display_y, 16,4, w4.BLIT_1BPP);
-    num(19, pitch_display_y+6, @floatToInt(u32, @fabs(@round(pitch))));
+    num(19, pitch_display_y+6, @intFromFloat(u32, @fabs(@round(pitch))));
     w4.blit(&degrees_text, 24, pitch_display_y+6, 3,3, w4.BLIT_1BPP);
     if (@round(pitch) > 0)
         w4.blit(&numbers[10], 6, pitch_display_y+6, 4, 6, w4.BLIT_1BPP);
 
 
     w4.blit(if (height_rel_to_ground) &ground_text else &alti_text, 42, pitch_display_y, 16, 4, w4.BLIT_1BPP);
-    num(50, pitch_display_y+6, @floatToInt(u32, (if (height_rel_to_ground) groundheight else altitude + 2) * 1000));
+    num(50, pitch_display_y+6, @intFromFloat(u32, (if (height_rel_to_ground) groundheight else altitude + 2) * 1000));
     w4.blit(&feet_text, 48, pitch_display_y+8, 16,4, w4.BLIT_1BPP);
 
 
@@ -575,7 +557,7 @@ export fn update() void {
         radar(.{run[0], run[2]-1}, heading, 3);
     }
     if (missile_active)
-        radar(.{missile.pos[0], missile.pos[2]}, heading, @as(u8, @boolToInt(frame % 4 < 2)) * 3);
+        radar(.{missile.pos[0], missile.pos[2]}, heading, @as(u8, @intFromBool(frame % 4 < 2)) * 3);
 
 
     // ARTIFICIAL HORIZON
@@ -592,11 +574,11 @@ export fn update() void {
     while (x < 90) : (x += 10) {
         const l = math.clamp(10 - @fabs(x + pitch + 10), 0, 2) * 4;
         if (l > 0) {
-            const d = scale2(screen_up, (x + pitch) *3);
+            const d = scale2(screen_up, (x + pitch) * 3);
             const right = center + d + scale2(screen_right, l);
             const left = center + d - scale2(screen_right, l);
-            w4.line(@floatToInt(i32, right[0]), @floatToInt(i32, screen_h-right[1]),
-                    @floatToInt(i32, left[0]), @floatToInt(i32, screen_h-left[1]));
+            w4.line(@intFromFloat(i32, right[0]), @intFromFloat(i32, screen_h-right[1]),
+                    @intFromFloat(i32, left[0]), @intFromFloat(i32, screen_h-left[1]));
         }
     }
 
@@ -617,20 +599,20 @@ export fn update() void {
 
 
     if (frame % 2 == 0) {
-//         w4.tone(130, 12, 3 + @floatToInt(u32, speedsound * 6), w4.TONE_NOISE);
+//         w4.tone(130, 12, 3 + @intFromFloat(u32, speedsound * 6), w4.TONE_NOISE);
     }
     if (frame % 2 == 0) {
-        w4.tone(75 + @floatToInt(u32, near_ground), 1, 5 + @floatToInt(u32, near_ground * 10), w4.TONE_PULSE2);
+        w4.tone(75 + @intFromFloat(u32, near_ground), 1, 5 + @intFromFloat(u32, near_ground * 10), w4.TONE_PULSE2);
     }
 
     if (frame % 10 == 0) {
 //         w4.tone(50, 70, 3, w4.TONE_PULSE1);
-        w4.tone(50, 12, @floatToInt(u32, throttle * 100), w4.TONE_TRIANGLE);
+        w4.tone(50, 12, @intFromFloat(u32, throttle * 100), w4.TONE_TRIANGLE);
 
         const missile_max_volume_dist = 0.3;
         const missile_volume = math.clamp(missile_max_volume_dist / dot(missile_delta, missile_delta), 0, 1);
         if (missile_active) {
-//             w4.tone(100, 12, @floatToInt(u32, 50.0 * missile_volume), w4.TONE_NOISE);
+//             w4.tone(100, 12, @intFromFloat(u32, 50.0 * missile_volume), w4.TONE_NOISE);
             const direction = rot(missile_delta, conj(cam_rot));
             var mode = w4.TONE_NOISE | w4.TONE_MODE3;
             const main_component = len(v2{direction[1], direction[2]});
@@ -638,7 +620,7 @@ export fn update() void {
                 mode |= w4.TONE_PAN_RIGHT;
             if (direction[0] < -main_component)
                 mode |= w4.TONE_PAN_LEFT;
-            w4.tone(90, 10, @floatToInt(u32, 50.0 * missile_volume), mode);
+            w4.tone(90, 10, @intFromFloat(u32, 50.0 * missile_volume), mode);
         }
     }
 
@@ -710,12 +692,12 @@ export fn update() void {
 
 
     if (false) {
-        for (print_vals) |v, i| {
+        for (print_vals, 0..) |v, i| {
             const print_y = 2 + 8 * @intCast(i32, i) + 1;
             w4.DRAW_COLORS.outline = 0;
             w4.rect(2, print_y-1, 34, 8);
             w4.DRAW_COLORS.outline = 3;
-            num(30, print_y, @floatToInt(u32, @fabs(v * 100)));
+            num(30, print_y, @intFromFloat(u32, @fabs(v * 100)));
             w4.pixel(24, @intCast(u32, print_y + 5), 2);
             w4.pixel(24, @intCast(u32, print_y + 6), 2);
             if (v < 0) {
@@ -745,7 +727,7 @@ fn radar(point: v2, angle: f32, col: u8) void {
     const x = @round( @cos(angle) * p[0] - @sin(angle) * p[1] );
     const y = @round( @sin(angle) * p[0] + @cos(angle) * p[1] );
     if (len(v2{x,y}) < radar_radius)
-        w4.pixel(@intCast(u32, radar_x + @floatToInt(i32, x)), @intCast(u32, radar_y + @floatToInt(i32, y)), col);
+        w4.pixel(@intCast(u32, radar_x + @intFromFloat(i32, x)), @intCast(u32, radar_y + @intFromFloat(i32, y)), col);
 }
 
 
@@ -764,8 +746,6 @@ const Entity = struct {
 
 /// Result is actually plain acceleration.
 fn wingForce(normal: v3, pos: v3, area: f32, drag: f32, stalling: *bool) struct { f: v3, trq: v3 } {
-    _ = drag;
-    _ = area;
     _ = stalling;
     const wing_pos = rot(scale(pos, 1.0 / 300.0), cam_rot);
     const surface = rot(scale(normal, area / len(normal)), cam_rot);
@@ -852,7 +832,7 @@ fn tooltip(p: v3, label: [*]const u8) void {
     camspace[1] *= -1;
     if (camspace[2] < clip_near)
         return;
-    if (camspace[2] / max_depth * 7 > @intToFloat(f32, frame % 4 + 3))
+    if (camspace[2] / max_depth * 7 > @floatFromInt(f32, frame % 4 + 3))
         return;
 
     const x = project(camspace);
@@ -872,8 +852,8 @@ const TEE = [8]u8 {
 
 fn hand(x: i32, y: i32, r: i32, a: f32) void {
     w4.line(x, y,
-        x - @floatToInt(i32, @intToFloat(f32, r)*@sin(a*math.tau)),
-        y - @floatToInt(i32, @intToFloat(f32, r)*@cos(a*math.tau))
+        x - @intFromFloat(i32, @floatFromInt(f32, r)*@sin(a*math.tau)),
+        y - @intFromFloat(i32, @floatFromInt(f32, r)*@cos(a*math.tau))
     );
 }
 
@@ -1070,14 +1050,14 @@ fn put(x: u32, y: u32, dpth: f32, col: u8) void {
     const dr = dpth / max_depth;
     if (dr < 0 or dr > 1)
         return;
-    const d = @floatToInt(Depth, @sqrt(dr)*depth_scale);
+    const d = @intFromFloat(Depth, @sqrt(dr)*depth_scale);
     const dither = dither2;
     const dithersize = dither[0..].len;
     const ditheroff = 4;
 
     if (depth[x][y] >= d) {
         const dith = dither[x%dithersize][y%dithersize];
-        const c = if (dr * depth_scale * (@intToFloat(f32, dithersize*dithersize)+ditheroff)/depth_scale < @intToFloat(f32, dith + ditheroff))
+        const c = if (dr * depth_scale * (@floatFromInt(f32, dithersize*dithersize)+ditheroff)/depth_scale < @floatFromInt(f32, dith + ditheroff))
             col else 0;
         w4.pixel(x, y, c);
         depth[x][y] = d;
@@ -1118,13 +1098,13 @@ fn clampy(x: i32) u32 {
 fn ilerp(a: i32, a_val: f32, b: i32, b_val: f32, t: u32) f32 {
     if (a == b)
         return (a_val + b_val) / 2;
-    const fac = @intToFloat(f32, (@intCast(i32, t) - a)) / @intToFloat(f32, b - a);
+    const fac = @floatFromInt(f32, (@intCast(i32, t) - a)) / @floatFromInt(f32, b - a);
     return (1-fac) * a_val + fac * b_val;
 }
 
 
 fn clamptoint(x: f32) i32 {
-    return if (x < oof-1 and x > -oof+1) @floatToInt(i32, @floor(x)) else oof;
+    return if (x < oof-1 and x > -oof+1) @intFromFloat(i32, @floor(x)) else oof;
 }
 
 const Projection = struct {
@@ -1166,13 +1146,13 @@ fn terrainHeight(x: f32, y: f32) f32 {
 //     const bim = biome(x, y);
     const u = x + 105;
     const v = y + 160;
-    return perlin(.{u, v}, 10) * 6 -@fabs(perlin(.{u, v + 100}, 5) * 5) + perlin(.{u, v + 500}, 3) * 3;
+    return perlin(.{u, v}, 10) * 6 - @fabs(perlin(.{u, v + 100}, 5) * 5) + perlin(.{u, v + 500}, 3) * 3;
 }
 
 fn perlin(v: v2, sc: f32) f32 {
     const cell = v2{@mod(v[0] / sc, 1), @mod(v[1] / sc, 1)};
-    const lower_x = @floatToInt(i32, @floor(v[0] / sc));
-    const lower_y = @floatToInt(i32, @floor(v[1] / sc));
+    const lower_x = @intFromFloat(i32, @floor(v[0] / sc));
+    const lower_y = @intFromFloat(i32, @floor(v[1] / sc));
 
     const corners_x = [4]f32{
         cell[0] * hash(lower_x, lower_y),
@@ -1201,8 +1181,8 @@ fn hash(x: i32, y: i32) f32 {
 //     const d = @truncate(u16, (u >> 3) ^ (v << 11) ^ (u >> 7) ^ (v << 13));
     const a = [2]i32{x,y};
     const d = @truncate(u16, std.hash.Wyhash.hash(1337, &@bitCast([8]u8, a)));
-    const c = (@intToFloat(f32, d) / 65536 - 0.5) * 2;
-    return math.copysign(f32, c * c, c);
+    const c = (@floatFromInt(f32, d) / 65536 - 0.5) * 2;
+    return math.copysign(c * c, c);
 }
 
 
@@ -1232,8 +1212,8 @@ fn gridheight(xs: f32, ys: f32) f32 {
 
 fn moveTo(x: f32, dest: f32, speed: f32) f32 {
     const d = @fabs(dest - x);
-    const vel = @minimum(d, @sqrt(d) * speed);
-    return x + math.copysign(f32, vel, dest - x);
+    const vel = @min(d, @sqrt(d) * speed);
+    return x + math.copysign(vel, dest - x);
 }
 
 fn full(p: f32) v3 {
@@ -1245,7 +1225,7 @@ fn len(x: anytype) f32 {
 }
 
 fn v2iv(x: v3) iv3 {
-    return .{ @floatToInt(i32, x[0]), @floatToInt(i32, x[1]), @floatToInt(i32, x[2]) };
+    return .{ @intFromFloat(i32, x[0]), @intFromFloat(i32, x[1]), @intFromFloat(i32, x[2]) };
 }
 
 inline fn dot(a: anytype, b: anytype) f32 {
@@ -1330,11 +1310,10 @@ fn any(v: anytype) bool {
 }
 
 fn curt(v: f32) f32 {
-    return math.copysign(f32, @sqrt(@fabs(v)), v);
+    return math.copysign(@sqrt(@fabs(v)), v);
 }
 
-pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace) noreturn {
-    _ = trace;
+pub fn panic(msg: []const u8, trace: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     w4.trace(msg);
     if (trace) |trc| {
         var buf: [32]u8 = undefined;
